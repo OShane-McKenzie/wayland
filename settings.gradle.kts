@@ -33,3 +33,6 @@ plugins {
 }
 
 include(":composeApp")
+
+
+include("composeApp:wayland-interop")

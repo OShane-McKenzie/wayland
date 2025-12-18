@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.composeHotReload)
+    kotlin("plugin.serialization") version "1.9.21"
+    `maven-publish`
 }
 
 kotlin {
@@ -27,10 +29,13 @@ kotlin {
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
+            implementation("net.java.dev.jna:jna:5.13.0")
+            implementation("net.java.dev.jna:jna-platform:5.13.0")
+            implementation(kotlin("reflect"))
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
         }
     }
 }
-
 
 compose.desktop {
     application {
@@ -40,6 +45,18 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "pkg.virdin.wayland"
             packageVersion = "1.0.0"
+        }
+    }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            groupId = "pkg.virdin"
+            artifactId = "wayland"
+            version = "1.0.0"
+
+            from(components["kotlin"])
         }
     }
 }

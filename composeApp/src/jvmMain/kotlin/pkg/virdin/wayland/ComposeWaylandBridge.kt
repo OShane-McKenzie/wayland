@@ -1,13 +1,8 @@
-package natives.wayland
+package pkg.virdin.wayland
 
 import androidx.compose.ui.awt.ComposeWindow
 import com.sun.jna.Pointer
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.awt.Dimension
 import java.awt.Toolkit
 import javax.swing.SwingUtilities
