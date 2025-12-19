@@ -1,23 +1,24 @@
 package pkg.virdin.wayland
 
-import androidx.compose.ui.awt.ComposeWindow
+//import androidx.compose.ui.awt.ComposeWindow
 import com.sun.jna.Pointer
 import kotlinx.coroutines.*
 import java.awt.Dimension
 import java.awt.Toolkit
 import javax.swing.SwingUtilities
+import java.awt.Window
 
 class ComposeWaylandBridge(
     private val waylandManager: WaylandWindowManager
 ) {
-    private var composeWindow: ComposeWindow? = null
+    private var composeWindow: Window? = null
     private var isConfigured = false
     private var eventLoopJob: Job? = null
     private var currentSurface: Pointer? = null
     private var currentLayerSurface: Pointer? = null
 
     fun configureAsDock(
-        window: ComposeWindow,
+        window: Window,
         coroutineScope: CoroutineScope,
         position: ContentPosition = ContentPosition.BOTTOM,
         size: Int = 64,
@@ -67,7 +68,7 @@ class ComposeWaylandBridge(
     }
 
     fun configureAsPanel(
-        window: ComposeWindow,
+        window: Window,
         coroutineScope: CoroutineScope,
         position: ContentPosition = ContentPosition.TOP,
         size: Int = 32,
@@ -117,7 +118,7 @@ class ComposeWaylandBridge(
     }
 
     fun configureAsDesktopBackground(
-        window: ComposeWindow,
+        window: Window,
         coroutineScope: CoroutineScope,
         namespace: String
     ) {
@@ -141,7 +142,7 @@ class ComposeWaylandBridge(
     }
 
     fun configureAsLockScreen(
-        window: ComposeWindow,
+        window: Window,
         coroutineScope: CoroutineScope,
         namespace: String
     ) {
@@ -165,7 +166,7 @@ class ComposeWaylandBridge(
     }
 
     fun configureAsOSD(
-        window: ComposeWindow,
+        window: Window,
         coroutineScope: CoroutineScope,
         width: Int = 300,
         height: Int = 100,
@@ -190,7 +191,7 @@ class ComposeWaylandBridge(
     }
 
     private fun configureWindow(
-        window: ComposeWindow,
+        window: Window,
         coroutineScope: CoroutineScope,
         layer: Int,
         anchor: Int,
