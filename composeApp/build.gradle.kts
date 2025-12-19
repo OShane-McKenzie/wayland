@@ -19,7 +19,7 @@ kotlin {
             compileOnly(compose.runtime)
 
             //implementation(compose.runtime)
-            implementation(compose.foundation)
+            compileOnly(compose.foundation)
             implementation(compose.material3)
             //implementation(compose.ui)
             implementation(compose.components.resources)
@@ -33,6 +33,8 @@ kotlin {
         jvmMain.dependencies {
             //implementation(compose.desktop.currentOs)
             compileOnly(compose.desktop.currentOs)
+
+
             implementation(libs.kotlinx.coroutinesSwing)
             implementation("net.java.dev.jna:jna:5.13.0")
             implementation("net.java.dev.jna:jna-platform:5.13.0")
@@ -59,7 +61,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "1.0.1"
+            version = "1.0.2"
 
             from(components["kotlin"])
         }
