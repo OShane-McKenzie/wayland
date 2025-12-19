@@ -14,26 +14,21 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-
-            compileOnly(compose.ui)
-            compileOnly(compose.runtime)
-
-            //implementation(compose.runtime)
-            compileOnly(compose.foundation)
-            implementation(compose.material3)
-            //implementation(compose.ui)
-            implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
-            implementation(libs.androidx.lifecycle.viewmodelCompose)
-            implementation(libs.androidx.lifecycle.runtimeCompose)
+            // Change these to 'api' so consumers get the right versions
+            api(compose.ui)
+            api(compose.runtime)
+            api(compose.foundation)
+            api(compose.material3)
+            api(compose.components.resources)
+            api(compose.components.uiToolingPreview)
+            api(libs.androidx.lifecycle.viewmodelCompose)
+            api(libs.androidx.lifecycle.runtimeCompose)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
         jvmMain.dependencies {
-            //implementation(compose.desktop.currentOs)
-            compileOnly(compose.desktop.currentOs)
-
+            api(compose.desktop.currentOs)  // Change to 'api'
 
             implementation(libs.kotlinx.coroutinesSwing)
             implementation("net.java.dev.jna:jna:5.13.0")
@@ -61,7 +56,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "1.0.2"
+            version = "1.0.3"
 
             from(components["kotlin"])
         }
