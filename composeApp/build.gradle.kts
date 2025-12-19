@@ -14,10 +14,14 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(compose.runtime)
+
+            compileOnly(compose.ui)
+            compileOnly(compose.runtime)
+
+            //implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
-            implementation(compose.ui)
+            //implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
@@ -27,7 +31,8 @@ kotlin {
             implementation(libs.kotlin.test)
         }
         jvmMain.dependencies {
-            implementation(compose.desktop.currentOs)
+            //implementation(compose.desktop.currentOs)
+            compileOnly(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutinesSwing)
             implementation("net.java.dev.jna:jna:5.13.0")
             implementation("net.java.dev.jna:jna-platform:5.13.0")
@@ -37,24 +42,24 @@ kotlin {
     }
 }
 
-compose.desktop {
-    application {
-        mainClass = "pkg.virdin.wayland.MainKt"
-
-        nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "pkg.virdin.wayland"
-            packageVersion = "1.0.0"
-        }
-    }
-}
+//compose.desktop {
+//    application {
+//        mainClass = "pkg.virdin.wayland.MainKt"
+//
+//        nativeDistributions {
+//            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+//            packageName = "pkg.virdin.wayland"
+//            packageVersion = "1.0.0"
+//        }
+//    }
+//}
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "1.0.0"
+            version = "1.0.1"
 
             from(components["kotlin"])
         }
