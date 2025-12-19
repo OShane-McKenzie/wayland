@@ -38,7 +38,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie.wayland:wayland:1.0.0")
+    implementation("com.github.OShane-McKenzie.wayland:wayland:1.0.1")
 }
 ```
 
