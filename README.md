@@ -2,7 +2,9 @@
 
 
 A Kotlin/JVM library that enables Jetpack Compose Desktop applications to interact with Wayland compositors using the **wlr-layer-shell** protocol. Create docks, panels, desktop backgrounds, lock screens, on-screen displays (OSDs), and application menus with native Wayland integration.
-
+---
+[![](https://jitpack.io/v/OShane-McKenzie/wayland.svg)](https://jitpack.io/#OShane-McKenzie/wayland)
+---
 ## Features
 
 - 🎯 **Native Wayland Support** - Direct integration with Wayland compositors via wlr-layer-shell
@@ -38,7 +40,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie.wayland:wayland:1.0.6-ALPHA")
+    implementation("com.github.OShane-McKenzie.wayland:wayland:1.0.7-ALPHA")
 }
 ```
 
