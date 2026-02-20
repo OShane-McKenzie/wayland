@@ -1,12 +1,12 @@
 # Virdin Compose Wayland Shell
 
 
-A Kotlin/JVM library that enables Jetpack Compose Desktop applications to interact with Wayland compositors using the **wlr-layer-shell** protocol. Create docks, panels, desktop backgrounds, lock screens, and on-screen displays (OSDs) with native Wayland integration.
+A Kotlin/JVM library that enables Jetpack Compose Desktop applications to interact with Wayland compositors using the **wlr-layer-shell** protocol. Create docks, panels, desktop backgrounds, lock screens, on-screen displays (OSDs), and application menus with native Wayland integration.
 
 ## Features
 
 - 🎯 **Native Wayland Support** - Direct integration with Wayland compositors via wlr-layer-shell
-- 🪟 **Multiple Window Types** - Dock, Panel, Desktop Background, Lock Screen, OSD
+- 🪟 **Multiple Window Types** - Dock, Panel, Desktop Background, Lock Screen, OSD, App Menu
 - 🎨 **Jetpack Compose Desktop** - Build beautiful UIs with Compose
 - ⚡ **Lightweight** - Minimal dependencies using JNA for native calls
 - 🔧 **Flexible Configuration** - Customize position, size, layer, and keyboard interactivity
@@ -187,6 +187,48 @@ waylandBridge.configureAsOSD(
 - No exclusive zone
 - Perfect for volume/brightness indicators
 
+### 6. App Menu
+
+Create an application menu that floats above the desktop, typically triggered from a dock or panel button:
+
+```kotlin
+waylandBridge.configureAsAppMenu(
+    window = window,
+    coroutineScope = scope,
+    width = 600,
+    height = 400,
+    anchor = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT
+)
+```
+
+**Features:**
+- `LAYER_TOP` — appears above normal windows but below lock screens and OSDs
+- On-demand keyboard focus for app search
+- No exclusive zone (doesn't push other windows aside)
+- Anchor is configurable to match where your launcher button lives
+- Dismisses naturally when focus is lost
+
+**Using the `WaylandCompose` helper:**
+
+```kotlin
+fun main() = application {
+    val bridge = WaylandCompose.rememberComposeWaylandBridge()
+    var menuVisible by remember { mutableStateOf(false) }
+
+    if (menuVisible) {
+        WaylandCompose.WaylandAppMenuWindow(
+            bridge = bridge,
+            windowState = WaylandCompose.rememberAppMenuWindowState(width = 600, height = 400),
+            anchor = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT,
+            onClose = { menuVisible = false }
+        ) {
+            // Your app menu content here
+            AppMenuContent(onDismiss = { menuVisible = false })
+        }
+    }
+}
+```
+
 ## Configuration Options
 
 ### DockPosition Enum
@@ -206,14 +248,14 @@ The library uses the wlr-layer-shell protocol with these layers (from bottom to 
 
 1. `LAYER_BACKGROUND` - Desktop backgrounds
 2. `LAYER_BOTTOM` - Below normal windows
-3. `LAYER_TOP` - Panels and docks (default)
+3. `LAYER_TOP` - Panels, docks, and app menus (default)
 4. `LAYER_OVERLAY` - Lock screens, OSDs, above everything
 
 ### Keyboard Interactivity
 
 - `KEYBOARD_INTERACTIVITY_NONE` - No keyboard input
 - `KEYBOARD_INTERACTIVITY_EXCLUSIVE` - Captures all keyboard input
-- `KEYBOARD_INTERACTIVITY_ON_DEMAND` - Keyboard on focus (default for docks)
+- `KEYBOARD_INTERACTIVITY_ON_DEMAND` - Keyboard on focus (default for docks and app menus)
 
 ## Advanced Usage
 
@@ -318,6 +360,7 @@ See the [examples](examples/) directory for complete working examples:
 - **Desktop Background** - Animated gradient background
 - **Lock Screen** - Password entry overlay
 - **Volume OSD** - Pop-up volume indicator
+- **App Menu** - Searchable application launcher menu
 
 ## Contributing
 
@@ -343,7 +386,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Links
 
-- [JitPack Repository](https://jitpack.io/#OShane-McKenzie/compose-wayland-interop)
+- [JitPack Repository](https://jitpack.io/#OShane-McKenzie/wayland)
 - [Issue Tracker](https://github.com/OShane-McKenzie/compose-wayland-interop/issues)
 - [wlr-layer-shell Protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1)
 - [Jetpack Compose Desktop](https://www.jetbrains.com/lp/compose-desktop/)

@@ -607,6 +607,72 @@ object WaylandCompose {
         }
     }
 
+    @Composable
+    fun WaylandAppMenuWindow(
+        bridge: ComposeWaylandBridge?,
+        windowState: WindowState,
+        namespace: String = "virdin-appmenu",
+        title: String = "App Menu",
+        width: Int = 600,
+        height: Int = 400,
+        anchor: Int = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT,
+        undecorated: Boolean = true,
+        transparent: Boolean = true,
+        alwaysOnTop: Boolean = true,
+        resizable: Boolean = false,
+        onClose: () -> Unit = {},
+        content: @Composable () -> Unit
+    ) {
+        val scope = rememberCoroutineScope()
+
+        Window(
+            onCloseRequest = {
+                bridge?.cleanup()
+                onClose()
+            },
+            state = windowState,
+            title = title,
+            undecorated = undecorated,
+            transparent = transparent,
+            alwaysOnTop = alwaysOnTop,
+            resizable = resizable
+        ) {
+            LaunchedEffect(Unit) {
+                val window = this@Window.window
+                if (bridge != null) {
+                    delay(100)
+                    bridge.configureAsAppMenu(
+                        window = window,
+                        coroutineScope = scope,
+                        width = width,
+                        height = height,
+                        anchor = anchor,
+                        namespace = namespace
+                    )
+                } else {
+                    // X11 fallback
+                    SwingUtilities.invokeLater {
+                        val screenSize = Toolkit.getDefaultToolkit().screenSize
+                        window.size = Dimension(width, height)
+                        window.setLocation(0, screenSize.height - height)
+                    }
+                }
+            }
+
+            content()
+        }
+    }
+
+    @Composable
+    fun rememberAppMenuWindowState(
+        width: Int = 600,
+        height: Int = 400
+    ) = rememberWindowState(
+        placement = WindowPlacement.Floating,
+        position = WindowPosition.Absolute(0.dp, 0.dp),
+        size = DpSize(width.dp, height.dp)
+    )
+
     /**
      * Creates a WindowState for dock windows (bottom, top, left, right).
      */
@@ -684,4 +750,6 @@ object WaylandCompose {
         size = DpSize.Unspecified
     )
     private data class Dimension4(val width: Int, val height: Int, val x: Int, val y: Int)
+
+
 }

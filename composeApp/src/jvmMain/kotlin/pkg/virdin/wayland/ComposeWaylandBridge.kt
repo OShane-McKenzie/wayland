@@ -190,6 +190,32 @@ class ComposeWaylandBridge(
         )
     }
 
+    fun configureAsAppMenu(
+        window: Window,
+        coroutineScope: CoroutineScope,
+        width: Int = 600,
+        height: Int = 400,
+        anchor: Int = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT,
+        namespace: String = "virdin-appmenu"
+    ) {
+        val screenSize = Toolkit.getDefaultToolkit().screenSize
+        val x = 0
+        val y = screenSize.height - height
+
+        configureWindow(
+            window = window,
+            coroutineScope = coroutineScope,
+            layer = LayerShellProtocol.LAYER_TOP,
+            anchor = anchor,
+            exclusiveZone = 0,
+            namespace = namespace,
+            x = x, y = y,
+            width = width,
+            height = height,
+            keyboardInteractivity = LayerShellProtocol.KEYBOARD_INTERACTIVITY_ON_DEMAND
+        )
+    }
+
     private fun configureWindow(
         window: Window,
         coroutineScope: CoroutineScope,
