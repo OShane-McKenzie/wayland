@@ -40,7 +40,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie.wayland:wayland:1.0.7-ALPHA")
+    implementation("com.github.OShane-McKenzie:wayland:1.0.7-ALPHA")
 }
 ```
 
