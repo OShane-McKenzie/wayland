@@ -44,52 +44,87 @@ dependencies {
 
 ## Quick Start
 
-### Basic Dock Example
+All window types follow the same simple pattern: get a bridge, get a window state, render a window. The `WaylandCompose` object handles Wayland detection, initialization, and X11 fallback automatically.
+
+### OSD (On-Screen Display)
 
 ```kotlin
-import androidx.compose.desktop.ui.tooling.preview.Preview
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.*
-import androidx.compose.ui.window.*
+import androidx.compose.material3.Text
+import androidx.compose.ui.window.application
 import pkg.virdin.wayland.*
 
 fun main() = application {
-    val nativeWayland = remember { NativeWaylandCalls() }
-    val scope = rememberCoroutineScope()
-    
-    val waylandBridge = remember {
-        if (nativeWayland.isWaylandAvailable() && nativeWayland.initialize()) {
-            nativeWayland.getManager()?.let { ComposeWaylandBridge(it) }
-        } else null
-    }
-    
-    DisposableEffect(Unit) {
-        onDispose {
-            waylandBridge?.cleanup()
-            nativeWayland.cleanup()
-        }
-    }
-    
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = "My Dock",
+    val bridge = WaylandCompose.rememberComposeWaylandBridge()
+    val windowState = WaylandCompose.rememberOSDWindowState()
+
+    WaylandCompose.WaylandOSDWindow(
+        bridge = bridge,
+        windowState = windowState,
+        title = "My OSD",
+        centerHorizontal = true,
+        centerVertical = true,
         undecorated = true,
         transparent = false,
-        alwaysOnTop = true,
-        resizable = false
+        onClose = { exitApplication() }
     ) {
-        LaunchedEffect(Unit) {
-            waylandBridge?.configureAsDock(
-                window = window,
-                coroutineScope = scope,
-                position = ContentPosition.BOTTOM,
-                size = 64
-            )
-        }
-        
-        MaterialTheme {
-            // Your dock UI here
-            YourDockContent()
+        Text("Hello Virdin")
+    }
+}
+```
+
+### Dock
+
+```kotlin
+fun main() = application {
+    val bridge = WaylandCompose.rememberComposeWaylandBridge()
+    val windowState = WaylandCompose.rememberDockWindowState()
+
+    WaylandCompose.WaylandDockWindow(
+        bridge = bridge,
+        windowState = windowState,
+        position = ContentPosition.BOTTOM,
+        size = 64,
+        onClose = { exitApplication() }
+    ) {
+        MyDockContent()
+    }
+}
+```
+
+### Panel
+
+```kotlin
+fun main() = application {
+    val bridge = WaylandCompose.rememberComposeWaylandBridge()
+    val windowState = WaylandCompose.rememberPanelWindowState()
+
+    WaylandCompose.WaylandPanelWindow(
+        bridge = bridge,
+        windowState = windowState,
+        position = ContentPosition.TOP,
+        size = 32,
+        onClose = { exitApplication() }
+    ) {
+        MyPanelContent()
+    }
+}
+```
+
+### App Menu
+
+```kotlin
+fun main() = application {
+    val bridge = WaylandCompose.rememberComposeWaylandBridge()
+    var menuVisible by remember { mutableStateOf(false) }
+
+    if (menuVisible) {
+        WaylandCompose.WaylandAppMenuWindow(
+            bridge = bridge,
+            windowState = WaylandCompose.rememberAppMenuWindowState(width = 600, height = 400),
+            anchor = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT,
+            onClose = { menuVisible = false }
+        ) {
+            MyAppMenuContent(onDismiss = { menuVisible = false })
         }
     }
 }
@@ -102,17 +137,18 @@ fun main() = application {
 Create an application dock at any screen edge:
 
 ```kotlin
-waylandBridge.configureAsDock(
-    window = window,
-    coroutineScope = scope,
+WaylandCompose.WaylandDockWindow(
+    bridge = bridge,
+    windowState = WaylandCompose.rememberDockWindowState(),
     position = ContentPosition.BOTTOM, // TOP, BOTTOM, LEFT, RIGHT
-    size = 64
-)
+    size = 64,
+    onClose = { exitApplication() }
+) { /* content */ }
 ```
 
 **Features:**
 - Reserves screen space (exclusive zone)
-- Interactive with on-demand keyboard focus
+- On-demand keyboard focus
 - Positioned at screen edges
 
 ### 2. Panel
@@ -120,12 +156,13 @@ waylandBridge.configureAsDock(
 Create a system panel (taskbar/top bar):
 
 ```kotlin
-waylandBridge.configureAsPanel(
-    window = window,
-    coroutineScope = scope,
+WaylandCompose.WaylandPanelWindow(
+    bridge = bridge,
+    windowState = WaylandCompose.rememberPanelWindowState(),
     position = ContentPosition.TOP,
-    size = 32
-)
+    size = 32,
+    onClose = { exitApplication() }
+) { /* content */ }
 ```
 
 **Features:**
@@ -138,10 +175,11 @@ waylandBridge.configureAsPanel(
 Create a desktop wallpaper/background:
 
 ```kotlin
-waylandBridge.configureAsDesktopBackground(
-    window = window,
-    coroutineScope = scope
-)
+WaylandCompose.WaylandBackgroundWindow(
+    bridge = bridge,
+    windowState = WaylandCompose.rememberBackgroundWindowState(),
+    onClose = { exitApplication() }
+) { /* content */ }
 ```
 
 **Features:**
@@ -155,10 +193,11 @@ waylandBridge.configureAsDesktopBackground(
 Create a lock screen overlay:
 
 ```kotlin
-waylandBridge.configureAsLockScreen(
-    window = window,
-    coroutineScope = scope
-)
+WaylandCompose.WaylandLockScreenWindow(
+    bridge = bridge,
+    windowState = WaylandCompose.rememberLockScreenWindowState(),
+    onClose = { exitApplication() }
+) { /* content */ }
 ```
 
 **Features:**
@@ -172,12 +211,13 @@ waylandBridge.configureAsLockScreen(
 Create notifications or temporary overlays:
 
 ```kotlin
-waylandBridge.configureAsOSD(
-    window = window,
-    coroutineScope = scope,
+WaylandCompose.WaylandOSDWindow(
+    bridge = bridge,
+    windowState = WaylandCompose.rememberOSDWindowState(width = 300, height = 100),
     width = 300,
-    height = 100
-)
+    height = 100,
+    onClose = { exitApplication() }
+) { /* content */ }
 ```
 
 **Features:**
@@ -192,13 +232,12 @@ waylandBridge.configureAsOSD(
 Create an application menu that floats above the desktop, typically triggered from a dock or panel button:
 
 ```kotlin
-waylandBridge.configureAsAppMenu(
-    window = window,
-    coroutineScope = scope,
-    width = 600,
-    height = 400,
-    anchor = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT
-)
+WaylandCompose.WaylandAppMenuWindow(
+    bridge = bridge,
+    windowState = WaylandCompose.rememberAppMenuWindowState(width = 600, height = 400),
+    anchor = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT,
+    onClose = { menuVisible = false }
+) { /* content */ }
 ```
 
 **Features:**
@@ -208,30 +247,9 @@ waylandBridge.configureAsAppMenu(
 - Anchor is configurable to match where your launcher button lives
 - Dismisses naturally when focus is lost
 
-**Using the `WaylandCompose` helper:**
-
-```kotlin
-fun main() = application {
-    val bridge = WaylandCompose.rememberComposeWaylandBridge()
-    var menuVisible by remember { mutableStateOf(false) }
-
-    if (menuVisible) {
-        WaylandCompose.WaylandAppMenuWindow(
-            bridge = bridge,
-            windowState = WaylandCompose.rememberAppMenuWindowState(width = 600, height = 400),
-            anchor = LayerShellProtocol.ANCHOR_BOTTOM or LayerShellProtocol.ANCHOR_LEFT,
-            onClose = { menuVisible = false }
-        ) {
-            // Your app menu content here
-            AppMenuContent(onDismiss = { menuVisible = false })
-        }
-    }
-}
-```
-
 ## Configuration Options
 
-### DockPosition Enum
+### ContentPosition Enum
 
 ```kotlin
 enum class ContentPosition {
@@ -261,7 +279,7 @@ The library uses the wlr-layer-shell protocol with these layers (from bottom to 
 
 ### Manual Configuration
 
-For complete control, use the low-level `WaylandWindowManager`:
+For complete control, use the low-level `WaylandWindowManager` directly:
 
 ```kotlin
 val manager = WaylandWindowManager()
@@ -275,10 +293,27 @@ if (manager.initialize()) {
         namespace = "my-custom-surface"
     )
     
-    // Configure size, anchor, etc.
     manager.setLayerSurfaceSize(layerSurface, 400, 200)
     manager.commitSurface(surface)
 }
+```
+
+Or use the generic `WaylandWindow` composable for full control within the `WaylandCompose` API:
+
+```kotlin
+WaylandCompose.WaylandWindow(
+    bridge = bridge,
+    windowState = windowState,
+    namespace = "my-custom-window",
+    configure = { window, b, scope ->
+        b.configureAsAppMenu(window, scope, width = 800, height = 500)
+    },
+    fallback = { window ->
+        window.setLocation(0, 0)
+        window.size = Dimension(800, 500)
+    },
+    onClose = { exitApplication() }
+) { /* content */ }
 ```
 
 ### Checking Compositor Support
@@ -303,6 +338,8 @@ if (!nativeWayland.isWaylandAvailable()) {
 The library is structured in layers:
 
 ```
+WaylandCompose (Composable helpers — recommended entry point)
+         ↓
 ComposeWaylandBridge (High-level API)
          ↓
 WaylandWindowManager (Mid-level protocol handling)
@@ -314,6 +351,7 @@ libwayland-client.so (Native Wayland library)
 
 ### Key Components
 
+- **`WaylandCompose`** - Composable window builders and window state helpers
 - **`ComposeWaylandBridge`** - High-level API for Compose Desktop
 - **`WaylandWindowManager`** - Manages Wayland connections and surfaces
 - **`NativeWaylandCalls`** - Initialization and environment detection
@@ -322,7 +360,7 @@ libwayland-client.so (Native Wayland library)
 
 ## Troubleshooting
 
-If running under XWayland, the library will fall back to X11 window positioning.
+If running under XWayland, the library will fall back to X11 window positioning automatically.
 
 ### JNA Native Library Issues
 
@@ -387,7 +425,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Links
 
 - [JitPack Repository](https://jitpack.io/#OShane-McKenzie/wayland)
-- [Issue Tracker](https://github.com/OShane-McKenzie/compose-wayland-interop/issues)
+- [Issue Tracker](https://github.com/OShane-McKenzie/wayland/issues)
 - [wlr-layer-shell Protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1)
 - [Jetpack Compose Desktop](https://www.jetbrains.com/lp/compose-desktop/)
 
