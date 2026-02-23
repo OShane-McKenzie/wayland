@@ -57,6 +57,7 @@ data class WindowConfig(
     val keyboardMode: KeyboardMode = KeyboardMode.NONE,
     val width: Int = 0,
     val height: Int = 0,
+    val margins: Margins = Margins.NONE,
     val namespace: String = "virdin-surface",
     val density: Density = Density(1f)
 )

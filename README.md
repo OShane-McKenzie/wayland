@@ -9,7 +9,7 @@ A Kotlin/JVM library that enables Jetpack Compose Desktop applications to render
 ## Features
 
 - 🎯 **Native Wayland Support** Direct compositor integration via `zwlr_layer_shell_v1`
-- 🪟 **Multiple Surface Types** Dock, Panel, Desktop Background, Lock Screen, OSD, App Menu
+- 🪟 **Multiple Surface Types** Dock, Panel, Desktop Background, Lock Screen, OSD, App Menu, Context Menu
 - 🎨 **Jetpack Compose Desktop** Full Compose UI with state, animations, and interactivity
 - 📦 **Zero native dependencies** `wayland-helper` binary is bundled inside the JAR, extracted at runtime
 - 🔧 **Flexible Configuration** Anchor, layer, exclusive zone, keyboard mode
@@ -123,21 +123,131 @@ Same as dock but with no keyboard focus by default. Ideal for status bars and ta
 ### 3. OSD (On-Screen Display)
 
 Floating, centred, no exclusive zone. Perfect for volume/brightness indicators.
+Create it from anywhere — including inside another surface's composable content.
 
 ```kotlin
-val bridge = waylandOsd(width = 280, height = 80, scope = scope) {
-    Box(
-        Modifier.fillMaxSize().background(Color(0xEE000000)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("🔊  Volume 75%", color = Color.White)
+suspend fun showVolumeOsd(scope: CoroutineScope) {
+    val bridge = waylandOsd(width = 280, height = 80, scope = scope) {
+        Box(
+            Modifier.fillMaxSize().background(Color(0xEE000000)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("🔊  Volume 75%", color = Color.White)
+        }
     }
+    delay(2000)
+    bridge.close()
 }
-delay(2000)
-bridge.close()
 ```
 
-### 4. App Menu
+Trigger it from inside a dock button:
+
+```kotlin
+val scope = rememberCoroutineScope()
+
+Button(onClick = {
+    scope.launch {
+        showVolumeOsd(scope)
+    }
+}) {
+    Text("Volume")
+}
+```
+
+### 4. Context Menu
+
+Automatically positions itself at the cursor and flips anchor when near screen edges
+so it never goes off-screen. Pass your screen dimensions and cursor position — the
+library handles the rest.
+
+```kotlin
+// Somewhere you have the screen size, e.g. read from wlr-randr or a config file
+val screen = ScreenSize(width = 1920f, height = 1080f)
+
+suspend fun showContextMenu(
+    cursorX: Float,
+    cursorY: Float,
+    scope: CoroutineScope
+) {
+    contextMenu(
+        cursorX      = cursorX,
+        cursorY      = cursorY,
+        menuWidth    = 200f,
+        menuHeight   = 200f,
+        screenWidth  = screen.width,
+        screenHeight = screen.height,
+        scope        = scope
+    ) { dismiss ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xFF2A2A2A))
+                .padding(8.dp)
+        ) {
+            TextButton(onClick = dismiss) { Text("Open",     color = Color.White) }
+            TextButton(onClick = dismiss) { Text("Settings", color = Color.White) }
+            Divider(color = Color.White.copy(alpha = 0.2f))
+            TextButton(onClick = dismiss) { Text("Quit",     color = Color.Red) }
+        }
+    }
+}
+```
+
+Trigger it from a right-click inside a dock:
+
+```kotlin
+val scope = rememberCoroutineScope()
+var cursorX by remember { mutableStateOf(0f) }
+var cursorY by remember { mutableStateOf(0f) }
+
+Box(
+    modifier = Modifier
+        .fillMaxSize()
+        .onPointerEvent(PointerEventType.Move) {
+            cursorX = it.changes.first().position.x
+            cursorY = it.changes.first().position.y
+        }
+        .onPointerEvent(PointerEventType.Press) {
+            if (it.buttons.isSecondaryPressed) {
+                scope.launch {
+                    showContextMenu(
+                        cursorX = cursorX,
+                        // offset by dock height so menu appears above dock
+                        cursorY = cursorY - dockHeight,
+                        scope   = scope
+                    )
+                }
+            }
+        }
+) { /* dock content */ }
+```
+
+The `dismiss` lambda simply calls `bridge.close()` — pass it to any item that
+should close the menu.
+
+#### `ContextMenuConfig` — manual control
+
+If you need to inspect or override the resolved positioning before creating the surface:
+
+```kotlin
+val config = ContextMenuConfig(
+    cursorX    = 850f,
+    cursorY    = 600f,
+    menuWidth  = 200f,
+    menuHeight = 240f,
+    screen     = ScreenSize(1920f, 1080f),
+    padding    = 8f           // min gap from screen edge before flipping anchor
+)
+
+println(config.resolvedAnchor)   // MenuAnchor.TOP_LEFT / TOP_RIGHT / BOTTOM_LEFT / BOTTOM_RIGHT
+val windowConfig = config.toWindowConfig(namespace = "my-menu")
+
+val bridge = waylandSurface(config = windowConfig, scope = scope) {
+    MyMenuContent { bridge.close() }
+}
+```
+
+### 5. App Menu
 
 > **Important:** use `mutableStateOf` (not `lateinit var`) to hold the bridge reference
 > inside composable content. The composable runs during scene construction, before
@@ -175,7 +285,7 @@ fun AppMenuContent() {
 }
 ```
 
-### 5. Desktop Background
+### 6. Desktop Background
 
 ```kotlin
 val bridge = waylandDesktopBackground(scope = scope) {
@@ -190,7 +300,7 @@ val bridge = waylandDesktopBackground(scope = scope) {
 
 Placed on the `BACKGROUND` layer, behind all other windows.
 
-### 6. Lock Screen
+### 7. Lock Screen
 
 ```kotlin
 val bridge = waylandLockScreen(scope = scope) { LockScreenContent() }
@@ -198,7 +308,7 @@ val bridge = waylandLockScreen(scope = scope) { LockScreenContent() }
 
 Placed on the `OVERLAY` layer with exclusive keyboard grab, captures all input.
 
-### 7. Fully Custom Surface
+### 8. Fully Custom Surface
 
 ```kotlin
 val bridge = waylandSurface(
@@ -214,6 +324,27 @@ val bridge = waylandSurface(
     scope = scope
 ) { /* content */ }
 ```
+
+## Spawning Multiple Surfaces
+
+Every surface is an independent bridge. You can spawn OSDs, context menus, and other
+surfaces from within any composable content using `rememberCoroutineScope` and
+`LaunchedEffect`:
+
+```kotlin
+// Inside a dock composable
+val scope = rememberCoroutineScope()
+
+Button(onClick = {
+    scope.launch { showVolumeOsd(scope) }
+}) {
+    Text("🔊")
+}
+```
+
+> **Avoid** creating a raw `CoroutineScope(Dispatchers.IO)` inside a composable —
+> it leaks because it is never cancelled. Use `rememberCoroutineScope()` instead,
+> which is automatically cancelled when the composable leaves composition.
 
 ## Configuration Reference
 
@@ -270,6 +401,26 @@ anchor = Anchor.BOTTOM or Anchor.RIGHT               // bottom-right corner widg
 enum class ContentPosition { TOP, BOTTOM, LEFT, RIGHT }
 ```
 
+### `ScreenSize`
+
+```kotlin
+data class ScreenSize(val width: Float, val height: Float)
+```
+
+Used by `contextMenu` and `ContextMenuConfig` to compute edge-aware positioning.
+
+### `MenuAnchor`
+
+Resolved automatically by `ContextMenuConfig.resolvedAnchor` based on available
+space around the cursor. Can be inspected before surface creation.
+
+```kotlin
+MenuAnchor.TOP_LEFT     // menu opens right-and-down (default, most common)
+MenuAnchor.TOP_RIGHT    // menu opens left-and-down  (near right edge)
+MenuAnchor.BOTTOM_LEFT  // menu opens right-and-up   (near bottom edge)
+MenuAnchor.BOTTOM_RIGHT // menu opens left-and-up    (near bottom-right corner)
+```
+
 ## Bridge Lifecycle
 
 ```kotlin
@@ -292,8 +443,8 @@ val LocalWaylandBridge: ProvidableCompositionLocal<WaylandBridge?>
 fun screenDensity(): Density
 
 // Override binary source
-BinarySource.Bundled                              // default, extracted from JAR
-BinarySource.Path("/your/path/wayland-helper") // use an installed binary
+BinarySource.Bundled                               // default, extracted from JAR
+BinarySource.Path("/your/path/wayland-helper")    // use an installed binary
 ```
 
 ## HiDPI / Density
