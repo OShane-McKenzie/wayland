@@ -34,7 +34,7 @@
 #include "wayland-util.h"
 
 #ifndef __has_attribute
-# define __has_attribute(x) 0
+# define __has_attribute(x) 0  /* Compatibility with non-clang compilers. */
 #endif
 
 #if (__has_attribute(visibility) || defined(__GNUC__) && __GNUC__ >= 4)

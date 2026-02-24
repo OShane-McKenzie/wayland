@@ -51,7 +51,7 @@ kotlin {
 //        nativeDistributions {
 //            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
 //            packageName = "pkg.virdin.wayland"
-//            packageVersion = "2.0.0"
+//            packageVersion = "2.0.2"
 //        }
 //    }
 //}
@@ -61,7 +61,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.0.1"
+            version = "2.0.2"
 
             from(components["kotlin"])
         }

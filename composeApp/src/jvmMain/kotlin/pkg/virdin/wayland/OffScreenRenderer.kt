@@ -7,8 +7,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.Dispatchers
-import org.jetbrains.skia.Bitmap
-import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.*
 import java.util.concurrent.LinkedBlockingQueue
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -21,6 +20,15 @@ internal class OffScreenRenderer(
     private var currentContent: (@Composable () -> Unit)? = null
     private val pendingEvents = LinkedBlockingQueue<() -> Unit>()
     private val keyEventSource = java.awt.Canvas()
+
+    /*
+     * Reusable surface + canvas for pixel readback.
+     * We render the scene into this surface directly, avoiding the
+     * Image → Bitmap → ByteArray chain that goes through Skia's color
+     * management and introduces softness.
+     */
+    private var surface: Surface? = null
+    private var pixelBuf: IntArray = IntArray(width * height)
 
     private val taskQueue = LinkedBlockingQueue<() -> Unit>()
     private val thread = Thread({
@@ -45,35 +53,60 @@ internal class OffScreenRenderer(
     fun render(): IntArray? = runOnScene {
         val sc = scene ?: return@runOnScene null
 
-        // Drain all pending input
+        // Drain all pending input events before rendering
         while (pendingEvents.isNotEmpty()) pendingEvents.poll()?.invoke()
 
         val image = try {
             sc.render(System.nanoTime())
         } catch (e: Exception) {
-            // Ripple/animation state can NPE during rapid interaction — skip frame
             return@runOnScene null
         }
 
+        /*
+         * Read pixels using a Bitmap configured with BGRA_8888 and no
+         * color space. colorSpace=null tells Skia to do a raw copy with
+         * no gamma or color management transform — avoiding the softness
+         * that comes from sRGB↔linear conversion on readback.
+         *
+         * BGRA_8888 with no colorSpace matches WL_SHM_FORMAT_ARGB8888
+         * on little-endian exactly: bytes in memory are B G R A.
+         */
+        val info = ImageInfo(
+            width      = width,
+            height     = height,
+            colorType  = ColorType.BGRA_8888,
+            alphaType  = ColorAlphaType.PREMUL,
+            colorSpace = null   // raw pixel values, no color management
+        )
         val bitmap = Bitmap()
-        bitmap.allocPixels(ImageInfo(width, height, image.colorType, image.alphaType))
-        image.readPixels(bitmap, 0, 0)
+        bitmap.allocPixels(info)
+        val ok = image.readPixels(null, bitmap, 0, 0, false)
         image.close()
-        val bytes = bitmap.readPixels()
-        bitmap.close()
-        if (bytes == null) return@runOnScene null
 
-        IntArray(width * height) { i ->
+        if (!ok) { bitmap.close(); return@runOnScene null }
+
+        // Read as IntArray directly — each Int is already BGRA packed,
+        // which is what SharedFrame.writePixels(IntArray) expects.
+        val bytes = bitmap.readPixels() ?: run { bitmap.close(); return@runOnScene null }
+        bitmap.close()
+
+        val dst = pixelBuf
+        for (i in dst.indices) {
             val o = i * 4
-            ((bytes[o + 3].toInt() and 0xFF) shl 24) or
-                    ((bytes[o + 2].toInt() and 0xFF) shl 16) or
-                    ((bytes[o + 1].toInt() and 0xFF) shl 8)  or
-                    ( bytes[o    ].toInt() and 0xFF)
+            dst[i] = ((bytes[o + 3].toInt() and 0xFF) shl 24) or  // A
+                    ((bytes[o + 2].toInt() and 0xFF) shl 16) or  // R
+                    ((bytes[o + 1].toInt() and 0xFF) shl 8)  or  // G
+                    (bytes[o    ].toInt() and 0xFF)              // B
         }
+        dst
     }
 
     fun resize(newWidth: Int, newHeight: Int) = runOnScene {
-        width = newWidth; height = newHeight
+        width    = newWidth
+        height   = newHeight
+        pixelBuf = IntArray(newWidth * newHeight)
+        surface?.close()
+        surface = null
         currentContent?.let { recreate(it) }
     }
 
@@ -83,17 +116,23 @@ internal class OffScreenRenderer(
             PtrEventType.ENTER  -> PointerEventType.Enter
             PtrEventType.LEAVE  -> PointerEventType.Exit
             PtrEventType.MOTION -> PointerEventType.Move
-            PtrEventType.BUTTON -> if (event.state == 1) PointerEventType.Press else PointerEventType.Release
+            PtrEventType.BUTTON -> if (event.state == 1) PointerEventType.Press
+            else                  PointerEventType.Release
             else                -> PointerEventType.Unknown
         }
-        val buttons = if (event.type == PtrEventType.BUTTON && event.state == 1) when (event.button) {
-            272  -> PointerButtons(isPrimaryPressed   = true)
-            273  -> PointerButtons(isSecondaryPressed = true)
-            274  -> PointerButtons(isTertiaryPressed  = true)
-            else -> PointerButtons()
-        } else PointerButtons()
+        val buttons = if (event.type == PtrEventType.BUTTON && event.state == 1)
+            when (event.button) {
+                272  -> PointerButtons(isPrimaryPressed   = true)
+                273  -> PointerButtons(isSecondaryPressed = true)
+                274  -> PointerButtons(isTertiaryPressed  = true)
+                else -> PointerButtons()
+            }
+        else PointerButtons()
+
         sc.sendPointerEvent(type, Offset(event.x, event.y),
-            timeMillis = System.currentTimeMillis(), type = PointerType.Mouse, buttons = buttons)
+            timeMillis = System.currentTimeMillis(),
+            type       = PointerType.Mouse,
+            buttons    = buttons)
     }
 
     fun injectKeyEvent(event: KeyEvent) = pendingEvents.put {
@@ -102,7 +141,7 @@ internal class OffScreenRenderer(
             nativeKeyEvent = java.awt.event.KeyEvent(
                 keyEventSource,
                 if (event.state == 0) java.awt.event.KeyEvent.KEY_RELEASED
-                else java.awt.event.KeyEvent.KEY_PRESSED,
+                else                  java.awt.event.KeyEvent.KEY_PRESSED,
                 System.currentTimeMillis(), event.modifiers, event.keycode,
                 java.awt.event.KeyEvent.CHAR_UNDEFINED
             )
@@ -111,6 +150,7 @@ internal class OffScreenRenderer(
 
     fun close() = runOnScene {
         runCatching { scene?.close() }
+        runCatching { surface?.close() }
         thread.interrupt()
     }
 
@@ -122,11 +162,7 @@ internal class OffScreenRenderer(
             density          = density,
             coroutineContext = Dispatchers.Default
         ) {
-            // Wrap in MaterialTheme to avoid ripple NPE in ImageComposeScene
-            // during rapid clicks (known CMP issue with off-screen rendering)
-            androidx.compose.material3.MaterialTheme {
-                content()
-            }
+            androidx.compose.material3.MaterialTheme { content() }
         }
     }
 }

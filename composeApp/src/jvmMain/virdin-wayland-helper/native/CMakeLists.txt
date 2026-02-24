@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(wayland_helper C)
-
 set(CMAKE_C_STANDARD 11)
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
+pkg_check_modules(XKBCOMMON      REQUIRED xkbcommon)
 find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
 
 # ── Generate wlr-layer-shell protocol glue code ───────────────────────────────
@@ -19,7 +19,6 @@ add_custom_command(
     DEPENDS ${LAYER_XML}
     COMMENT "Generating wlr-layer-shell header"
 )
-
 add_custom_command(
     OUTPUT ${LAYER_SRC}
     COMMAND ${WAYLAND_SCANNER} private-code ${LAYER_XML} ${LAYER_SRC}
@@ -29,7 +28,6 @@ add_custom_command(
 
 # ── Generate xdg-shell protocol glue code ─────────────────────────────────────
 set(XDG_XML    "/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml")
-
 set(XDG_HEADER "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.h")
 set(XDG_SRC    "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.c")
 
@@ -39,7 +37,6 @@ add_custom_command(
     DEPENDS ${XDG_XML}
     COMMENT "Generating xdg-shell header"
 )
-
 add_custom_command(
     OUTPUT ${XDG_SRC}
     COMMAND ${WAYLAND_SCANNER} private-code ${XDG_XML} ${XDG_SRC}
@@ -47,7 +44,7 @@ add_custom_command(
     COMMENT "Generating xdg-shell source"
 )
 
-# Force generation to happen before building the executable
+# Force all protocol generation before the executable builds
 add_custom_target(wayland-protocols
     DEPENDS ${LAYER_HEADER} ${LAYER_SRC} ${XDG_HEADER} ${XDG_SRC}
 )
@@ -63,15 +60,18 @@ add_dependencies(wayland-helper wayland-protocols)
 
 target_include_directories(wayland-helper PRIVATE
     ${WAYLAND_CLIENT_INCLUDE_DIRS}
-    ${CMAKE_CURRENT_BINARY_DIR}
+    ${XKBCOMMON_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_BINARY_DIR}   # where generated headers live
 )
 
 target_link_libraries(wayland-helper
     ${WAYLAND_CLIENT_LIBRARIES}
+    ${XKBCOMMON_LIBRARIES}
 )
 
 target_compile_options(wayland-helper PRIVATE
     ${WAYLAND_CLIENT_CFLAGS_OTHER}
+    ${XKBCOMMON_CFLAGS_OTHER}
     -Wall -Wextra -O2
 )
 
@@ -81,7 +81,6 @@ execute_process(
     OUTPUT_VARIABLE HOST_ARCH
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-
 string(TOLOWER "${HOST_ARCH}" HOST_ARCH)
 if(HOST_ARCH STREQUAL "arm64")
     set(HOST_ARCH "aarch64")

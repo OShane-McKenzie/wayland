@@ -1,5 +1,5 @@
 package pkg.virdin.wayland
-
+//
 //import androidx.compose.foundation.background
 //import androidx.compose.foundation.layout.*
 //import androidx.compose.material3.*
@@ -7,24 +7,25 @@ package pkg.virdin.wayland
 //import androidx.compose.ui.Alignment
 //import androidx.compose.ui.Modifier
 //import androidx.compose.ui.graphics.Color
+//import androidx.compose.ui.unit.Density
 //import androidx.compose.ui.unit.dp
 //import kotlinx.coroutines.*
 //import kotlinx.coroutines.swing.Swing
 //import pkg.virdin.wayland.*
 //import javax.swing.SwingUtilities
-
-// ── Entry point ───────────────────────────────────────────────────────────────
 //
-// Must launch from the Swing EDT so that Dispatchers.Swing has a running
-// event pump to dispatch to.  runBlocking on the main thread blocks the
-// thread but does NOT start an AWT event loop — Dispatchers.Swing tasks
-// posted from that context queue up and never execute, producing blank frames.
+//// ── Entry point ───────────────────────────────────────────────────────────────
+////
+//// Must launch from the Swing EDT so that Dispatchers.Swing has a running
+//// event pump to dispatch to.  runBlocking on the main thread blocks the
+//// thread but does NOT start an AWT event loop — Dispatchers.Swing tasks
+//// posted from that context queue up and never execute, producing blank frames.
+////
+//// Pattern:
+////   SwingUtilities.invokeLater  →  starts AWT pump on EDT
+////   CoroutineScope(Dispatchers.Swing)  →  coroutines run on that same EDT
+////   done.await()  →  main thread sleeps until bridge.close() is called
 //
-// Pattern:
-//   SwingUtilities.invokeLater  →  starts AWT pump on EDT
-//   CoroutineScope(Dispatchers.Swing)  →  coroutines run on that same EDT
-//   done.await()  →  main thread sleeps until bridge.close() is called
-
 //fun main() {
 //    val done = CompletableDeferred<Unit>()
 //
@@ -32,7 +33,7 @@ package pkg.virdin.wayland
 //        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
 //        scope.launch {
 //            try {
-//                 demoBottomDock(scope)
+//                // demoBottomDock(scope)
 //                // demoTopPanel(scope)
 //                // demoOsd(scope)
 //                // demoAppMenu(scope)
@@ -117,6 +118,7 @@ package pkg.virdin.wayland
 //        height   = 350,
 //        scope    = scope
 //    ) {
+//        println("[JVM] density=${screenDensity().density}")
 //        CompositionLocalProvider(LocalWaylandBridge provides bridgeRef.value) {
 //            AppMenuContent()
 //        }
@@ -137,7 +139,8 @@ package pkg.virdin.wayland
 //        Text("Applications", color = Color.White, style = MaterialTheme.typography.titleMedium)
 //        Spacer(Modifier.height(12.dp))
 //        listOf("Files", "Terminal", "Browser", "Settings").forEach { app ->
-//            TextButton(onClick = { bridge?.close() }) {
+//            TextButton(onClick = {  }) {
+//                // bridge?.close()
 //                Text(app, color = Color.White)
 //            }
 //        }

@@ -45,9 +45,10 @@ data class PointerEvent(
 ) : WaylandEvent()
 
 data class KeyEvent(
-    val keycode: Int,
+    val keycode: Int,     // raw evdev keycode
     val state: Int,       // 0=released, 1=pressed, 2=repeated
-    val modifiers: Int
+    val modifiers: Int,   // bit0=shift bit1=ctrl bit2=alt bit3=super
+    val keysym: Int = 0   // XKB keysym (layout-aware, unicode-aware)
 ) : WaylandEvent()
 
 data class ResizeEvent(val width: Int, val height: Int) : WaylandEvent()
@@ -93,6 +94,10 @@ internal fun buildConfigureMsg(config: WindowConfig, shmPath: String): ByteArray
         putInt(config.keyboardMode.value)
         putInt(config.width)
         putInt(config.height)
+        putInt(config.margins.top)
+        putInt(config.margins.bottom)
+        putInt(config.margins.left)
+        putInt(config.margins.right)
         putLenString(config.namespace)
         putLenString(shmPath)
     }
@@ -125,10 +130,11 @@ internal fun parseEvent(type: Int, payload: ByteArray): WaylandEvent? {
             PointerEvent(evType, x, y, btn, st)
         }
         MsgType.KEY_EVENT -> {
-            val kc   = buf.int
-            val st   = buf.int
-            val mods = buf.int
-            KeyEvent(kc, st, mods)
+            val kc     = buf.int
+            val st     = buf.int
+            val mods   = buf.int
+            val keysym = if (buf.remaining() >= 4) buf.int else 0
+            KeyEvent(kc, st, mods, keysym)
         }
         MsgType.RESIZE -> {
             val w = buf.int; val h = buf.int

@@ -11,19 +11,9 @@ import kotlinx.coroutines.swing.Swing
  * Wayland desktops set, then fall back to AWT.
  */
 fun screenDensity(): Density {
-    // Most Wayland compositors set one of these for apps that don't speak HiDPI natively
     val fromEnv = System.getenv("GDK_SCALE")?.toFloatOrNull()
         ?: System.getenv("QT_SCALE_FACTOR")?.toFloatOrNull()
-        ?: System.getenv("XCURSOR_SIZE")?.let { null } // don't use XCURSOR_SIZE
     if (fromEnv != null && fromEnv > 0f) return Density(fromEnv)
-
-    // Check wl_output scale via env var set by some launchers
-    System.getenv("WAYLAND_DISPLAY")?.let {
-        // On typical 2x HiDPI Wayland setups the output scale is 2
-        // We can't query wl_output from here without a display connection,
-        // so fall back to AWT which at least works on X11/XWayland
-    }
-
     return try {
         val dpi = java.awt.Toolkit.getDefaultToolkit().screenResolution
         Density(dpi / 96f)
@@ -32,12 +22,12 @@ fun screenDensity(): Density {
     }
 }
 
-// ── Generic / fully-custom surface ────────────────────────────────────────────
+// ── Generic / fully-custom surface ───────────────────────────────────────────
 
 /**
  * Create a Wayland layer-shell surface with full control over every parameter.
  *
- * @param config   The complete [WindowConfig].  Use [SurfacePresets] or build one from scratch.
+ * @param config   The complete [WindowConfig]. Use [SurfacePresets] or build one from scratch.
  * @param binary   Where to find the wayland-helper binary.
  *                 Defaults to [BinarySource.Bundled] (extracted from the JAR).
  *                 Pass [BinarySource.Path] to use a binary you have installed yourself.
@@ -55,32 +45,49 @@ suspend fun waylandSurface(
     return bridge
 }
 
+// ── Preset surfaces ───────────────────────────────────────────────────────────
+
+/**
+ * Application dock anchored to a screen edge.
+ *
+ * @param position  Edge to anchor to.
+ * @param size      Thickness in logical pixels.
+ * @param margins   Gap between dock and screen edges. e.g. [Margins.all(8)] for a floating look.
+ */
 suspend fun waylandDock(
     position:  ContentPosition = ContentPosition.BOTTOM,
     size:      Int             = 64,
+    margins:   Margins         = Margins.NONE,
     namespace: String          = "virdin-dock",
     density:   Density         = screenDensity(),
     binary:    BinarySource    = BinarySource.Bundled,
     scope:     CoroutineScope  = CoroutineScope(Dispatchers.Swing + SupervisorJob()),
     content:   @Composable () -> Unit
 ): WaylandBridge = waylandSurface(
-    config  = SurfacePresets.dock(position, size, namespace).copy(density = density),
+    config  = SurfacePresets.dock(position, size, margins, namespace).copy(density = density),
     binary  = binary, scope = scope, content = content
 )
 
+/**
+ * Status bar / taskbar panel.
+ *
+ * @param margins  Gap between panel and screen edges.
+ */
 suspend fun waylandPanel(
     position:  ContentPosition = ContentPosition.TOP,
     size:      Int             = 32,
+    margins:   Margins         = Margins.NONE,
     namespace: String          = "virdin-panel",
     density:   Density         = screenDensity(),
     binary:    BinarySource    = BinarySource.Bundled,
     scope:     CoroutineScope  = CoroutineScope(Dispatchers.Swing + SupervisorJob()),
     content:   @Composable () -> Unit
 ): WaylandBridge = waylandSurface(
-    config  = SurfacePresets.panel(position, size, namespace).copy(density = density),
+    config  = SurfacePresets.panel(position, size, margins, namespace).copy(density = density),
     binary  = binary, scope = scope, content = content
 )
 
+/** Full-screen desktop background (BACKGROUND layer). */
 suspend fun waylandDesktopBackground(
     namespace: String         = "virdin-background",
     density:   Density        = screenDensity(),
@@ -92,6 +99,7 @@ suspend fun waylandDesktopBackground(
     binary  = binary, scope = scope, content = content
 )
 
+/** Full-screen lock screen — grabs keyboard exclusively. */
 suspend fun waylandLockScreen(
     namespace: String         = "virdin-lockscreen",
     density:   Density        = screenDensity(),
@@ -103,6 +111,10 @@ suspend fun waylandLockScreen(
     binary  = binary, scope = scope, content = content
 )
 
+/**
+ * On-screen display — floating, no exclusive zone, centred by default.
+ * Perfect for volume/brightness indicators. Call [WaylandBridge.close] to dismiss.
+ */
 suspend fun waylandOsd(
     width:     Int            = 300,
     height:    Int            = 100,
@@ -116,21 +128,32 @@ suspend fun waylandOsd(
     binary  = binary, scope = scope, content = content
 )
 
+/**
+ * App launcher / application menu.
+ *
+ * > **Important:** use `mutableStateOf` (not `lateinit var`) to hold the bridge
+ * > reference inside composable content. The composable runs during scene
+ * > construction — before `waylandAppMenu` returns — so `lateinit` will throw
+ * > [UninitializedPropertyAccessException].
+ *
+ * @param margins  Gap between menu surface and the anchored screen edge.
+ */
 suspend fun waylandAppMenu(
     position:  ContentPosition = ContentPosition.BOTTOM,
     width:     Int             = 600,
     height:    Int             = 400,
+    margins:   Margins         = Margins.NONE,
     namespace: String          = "virdin-appmenu",
     density:   Density         = screenDensity(),
     binary:    BinarySource    = BinarySource.Bundled,
     scope:     CoroutineScope  = CoroutineScope(Dispatchers.Swing + SupervisorJob()),
     content:   @Composable () -> Unit
 ): WaylandBridge = waylandSurface(
-    config  = SurfacePresets.appMenu(position, width, height, namespace).copy(density = density),
+    config  = SurfacePresets.appMenu(position, width, height, margins, namespace).copy(density = density),
     binary  = binary, scope = scope, content = content
 )
 
-// ── Convenience ───────────────────────────────────────────────────────────────
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 suspend fun WaylandBridge.awaitClose() {
     // Wait for RUNNING first (scene creation is async via invokeLater)

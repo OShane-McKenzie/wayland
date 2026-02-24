@@ -25,19 +25,7 @@ enum class MenuAnchor {
     BOTTOM_RIGHT,  // menu opens left-and-up    (near bottom-right corner)
 }
 
-data class Margins(
-    val top:    Int = 0,
-    val bottom: Int = 0,
-    val left:   Int = 0,
-    val right:  Int = 0
-) {
-    companion object {
-        val NONE = Margins()
-        fun all(px: Int) = Margins(px, px, px, px)
-        fun horizontal(px: Int) = Margins(left = px, right = px)
-        fun vertical(px: Int) = Margins(top = px, bottom = px)
-    }
-}
+
 
 // ── Config ────────────────────────────────────────────────────────────────────
 

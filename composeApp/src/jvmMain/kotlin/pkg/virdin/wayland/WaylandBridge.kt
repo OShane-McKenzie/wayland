@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.util.concurrent.ArrayBlockingQueue
 
 class WaylandBridge(
     private val scope: CoroutineScope,
@@ -24,9 +25,10 @@ class WaylandBridge(
     private var process:  Process?           = null
     private var recvJob:  Job?               = null
 
-    @Volatile private var frameSeq:        Long    = 0L
-    @Volatile private var framePendingAck: Boolean = false
-    @Volatile private var running:         Boolean = false
+    @Volatile private var frameSeq: Long    = 0L
+    @Volatile private var running:  Boolean = false
+
+    private val renderTrigger = ArrayBlockingQueue<Unit>(1)
 
     suspend fun configure(config: WindowConfig, content: @Composable () -> Unit) {
         require(_state.value == BridgeState.IDLE) { "Already configured." }
@@ -75,11 +77,12 @@ class WaylandBridge(
             recvJob = scope.launch(Dispatchers.IO) {
                 for (event in bridgeSock.incomingEvents) {
                     when (event) {
-                        is FrameDone    -> framePendingAck = false
+                        is FrameDone    -> renderTrigger.offer(Unit)
                         is PointerEvent -> rend.injectPointerEvent(event)
                         is KeyEvent     -> rend.injectKeyEvent(event)
                         is ResizeEvent  -> {
-                            actualWidth = event.width; actualHeight = event.height
+                            actualWidth  = event.width
+                            actualHeight = event.height
                             shm?.resize(event.width, event.height)
                             rend.resize(event.width, event.height)
                         }
@@ -96,24 +99,19 @@ class WaylandBridge(
             _state.value = BridgeState.CONFIGURED
             _state.value = BridgeState.RUNNING
 
-            // Simple 60fps poll loop — render every 16ms unconditionally.
-            // This is the most reliable approach: no dirty flags, no condition
-            // variables, no missed wakeups. CPU cost is negligible for a small
-            // dock surface. Frames are only pushed to the compositor when pixels
-            // actually changed (cheap IntArray comparison).
             Thread({
-
                 while (running) {
-                    Thread.sleep(16)
+                    try {
+                        renderTrigger.take()
+                    } catch (e: InterruptedException) {
+                        break
+                    }
 
-                    if (framePendingAck) continue
+                    if (!running) break
 
                     val pixels = rend.render() ?: continue
-                    if (pixels.any { it != 0 }) {
-                        frame.writePixels(pixels)
-                        framePendingAck = true
-                        bridgeSock.send(buildFrameReadyMsg(++frameSeq))
-                    }
+                    frame.writePixels(pixels)
+                    bridgeSock.send(buildFrameReadyMsg(++frameSeq))
                 }
             }, "virdin-render").apply { isDaemon = true; start() }
 
@@ -128,6 +126,7 @@ class WaylandBridge(
 
     fun close() {
         running = false
+        renderTrigger.offer(Unit)
         recvJob?.cancel()
         runCatching { socket?.send(buildShutdownMsg()) }
         runCatching { process?.destroy() }
