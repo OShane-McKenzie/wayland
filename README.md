@@ -1,56 +1,29 @@
 # Virdin Compose Wayland Shell
 
-A Kotlin/JVM library that lets Jetpack Compose Desktop applications render directly onto Wayland layer-shell surfaces. Build docks, panels, desktop backgrounds, lock screens, on-screen displays, and application menus with native Wayland integration.
 
-[![](https://jitpack.io/v/OShane-McKenzie/wayland.svg)](https://jitpack.io/#OShane-McKenzie/wayland)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-
----
-
-## License
-
-This project is licensed under the **GNU General Public License v3.0**.
-See the full license text at [https://www.gnu.org/licenses/gpl-3.0](https://www.gnu.org/licenses/gpl-3.0).
-
----
+A Kotlin/JVM library that enables Jetpack Compose Desktop applications to interact with Wayland compositors using the **wlr-layer-shell** protocol. Create docks, panels, desktop backgrounds, lock screens, and on-screen displays (OSDs) with native Wayland integration.
 
 ## Features
 
-- Native Wayland layer-shell integration via `zwlr_layer_shell_v1`
-- Full Jetpack Compose Desktop support with state, animations, and interactivity
-- Zero runtime native dependencies. The `wayland-helper` binary is bundled inside the JAR and extracted automatically
-- Multiple surface types: Dock, Panel, OSD, App Menu, Context Menu, Desktop Background, Lock Screen
-- Vsync-paced rendering driven by compositor frame callbacks
-- Full keyboard support via xkbcommon with layout-aware keysyms and modifier state
-- Flexible configuration: anchor, layer, exclusive zone, keyboard mode, margins
-- HiDPI support via `GDK_SCALE` / `QT_SCALE_FACTOR` environment variables
-
----
+- 🎯 **Native Wayland Support** - Direct integration with Wayland compositors via wlr-layer-shell
+- 🪟 **Multiple Window Types** - Dock, Panel, Desktop Background, Lock Screen, OSD
+- 🎨 **Jetpack Compose Desktop** - Build beautiful UIs with Compose
+- ⚡ **Lightweight** - Minimal dependencies using JNA for native calls
+- 🔧 **Flexible Configuration** - Customize position, size, layer, and keyboard interactivity
+- 🐧 **Linux First** - Built specifically for Linux desktop environments
 
 ## Requirements
 
-- Linux with Wayland
-- Compositor supporting `zwlr_layer_shell_v1` (Sway, Hyprland, KWin 5.27+)
-- Java 17 or higher
-- Gradle 8.0 or higher
-
----
-
-## How It Works
-
-A small C binary (`wayland-helper`) is bundled inside the JAR and extracted at runtime. It connects to the Wayland compositor via `zwlr_layer_shell_v1`, creates a shared-memory framebuffer, and communicates with the JVM over a Unix domain socket. The JVM renders Compose frames into the shared memory using Skia (`ImageComposeScene`) and signals the binary to commit each frame. Frame commits are paced to the compositor vsync via `wl_surface.frame` callbacks.
-
-```
-JVM (Compose/Skia) --socket--> wayland-helper --Wayland--> Compositor
-        ^                                                        |
-        +-------------- shared memory (pixels) <----------------+
-```
-
----
+- **Operating System**: Linux with Wayland
+- **Compositor**: Must support `wlr-layer-shell-unstable-v1` protocol
+- **JVM**: Java 17 or higher
+- **Gradle**: 8.0 or higher
 
 ## Installation
 
-Add JitPack to your `settings.gradle.kts`:
+### Using JitPack
+
+Add JitPack repository to your `settings.gradle.kts`:
 
 ```kotlin
 dependencyResolutionManagement {
@@ -65,451 +38,316 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie:wayland:TAG")
+    implementation("com.github.OShane-McKenzie.wayland:wayland:1.0.0")
 }
 ```
-
-Replace `TAG` with the latest release version shown in the badge above.
-
----
 
 ## Quick Start
 
-The entry point must run on the Swing EDT so Compose's coroutine dispatcher has a running event pump:
+### Basic Dock Example
 
 ```kotlin
-fun main() {
-    val done = CompletableDeferred<Unit>()
-    SwingUtilities.invokeLater {
-        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
-        scope.launch {
-            try {
-                myDock(scope)
-            } finally {
-                done.complete(Unit)
-            }
+import androidx.compose.desktop.ui.tooling.preview.Preview
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.*
+import androidx.compose.ui.window.*
+import pkg.virdin.wayland.*
+
+fun main() = application {
+    val nativeWayland = remember { NativeWaylandCalls() }
+    val scope = rememberCoroutineScope()
+    
+    val waylandBridge = remember {
+        if (nativeWayland.isWaylandAvailable() && nativeWayland.initialize()) {
+            nativeWayland.getManager()?.let { ComposeWaylandBridge(it) }
+        } else null
+    }
+    
+    DisposableEffect(Unit) {
+        onDispose {
+            waylandBridge?.cleanup()
+            nativeWayland.cleanup()
         }
     }
-    runBlocking { done.await() }
-}
-
-suspend fun myDock(scope: CoroutineScope) {
-    val bridge = waylandDock(
-        position = ContentPosition.BOTTOM,
-        size     = 64,
-        scope    = scope
+    
+    Window(
+        onCloseRequest = ::exitApplication,
+        title = "My Dock",
+        undecorated = true,
+        transparent = false,
+        alwaysOnTop = true,
+        resizable = false
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(Color(0xCC1E1E2E)),
-            contentAlignment = Alignment.Center
-        ) {
-            var label by remember { mutableStateOf("My Dock") }
-            Button({ label = "Clicked!" }) {
-                Text("$label", color = Color.White)
-            }
+        LaunchedEffect(Unit) {
+            waylandBridge?.configureAsDock(
+                window = window,
+                coroutineScope = scope,
+                position = ContentPosition.BOTTOM,
+                size = 64
+            )
         }
-    }
-    bridge.awaitClose()
-}
-```
-
----
-
-## Surface Types
-
-### Dock
-
-Reserves screen space so windows do not overlap it. Focuses keyboard on click.
-
-```kotlin
-val bridge = waylandDock(
-    position  = ContentPosition.BOTTOM,
-    size      = 64,
-    margins   = Margins.NONE,
-    namespace = "my-dock",
-    density   = screenDensity(),
-    scope     = scope
-) { /* Compose content */ }
-```
-
-### Panel
-
-Same as dock but with no keyboard focus. Ideal for status bars and taskbars.
-
-```kotlin
-val bridge = waylandPanel(
-    position  = ContentPosition.TOP,
-    size      = 32,
-    namespace = "my-panel",
-    scope     = scope
-) { /* Compose content */ }
-```
-
-### OSD (On-Screen Display)
-
-Floating, centred, no exclusive zone. Perfect for volume and brightness indicators.
-
-```kotlin
-suspend fun showVolumeOsd(scope: CoroutineScope) {
-    val bridge = waylandOsd(width = 280, height = 80, scope = scope) {
-        Box(
-            Modifier.fillMaxSize().background(Color(0xEE000000)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Volume 75%", color = Color.White)
-        }
-    }
-    delay(2000)
-    bridge.close()
-}
-```
-
-Trigger it from inside a dock button:
-
-```kotlin
-val scope = rememberCoroutineScope()
-
-Button(onClick = {
-    scope.launch { showVolumeOsd(scope) }
-}) {
-    Text("Volume")
-}
-```
-
-### Context Menu
-
-Automatically positions itself at the cursor and flips its anchor when near screen edges.
-
-```kotlin
-suspend fun showContextMenu(cursorX: Float, cursorY: Float, scope: CoroutineScope) {
-    contextMenu(
-        cursorX      = cursorX,
-        cursorY      = cursorY,
-        menuWidth    = 200f,
-        menuHeight   = 200f,
-        screenWidth  = 1920f,
-        screenHeight = 1080f,
-        scope        = scope
-    ) { dismiss ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .background(Color(0xFF2A2A2A))
-                .padding(8.dp)
-        ) {
-            TextButton(onClick = dismiss) { Text("Open",     color = Color.White) }
-            TextButton(onClick = dismiss) { Text("Settings", color = Color.White) }
-            Divider(color = Color.White.copy(alpha = 0.2f))
-            TextButton(onClick = dismiss) { Text("Quit",     color = Color.Red) }
+        
+        MaterialTheme {
+            // Your dock UI here
+            YourDockContent()
         }
     }
 }
 ```
 
-Trigger from a right-click:
+## Window Types
+
+### 1. Dock
+
+Create an application dock at any screen edge:
 
 ```kotlin
-val scope = rememberCoroutineScope()
-var cursorX by remember { mutableStateOf(0f) }
-var cursorY by remember { mutableStateOf(0f) }
-
-Box(
-    modifier = Modifier
-        .fillMaxSize()
-        .onPointerEvent(PointerEventType.Move) {
-            cursorX = it.changes.first().position.x
-            cursorY = it.changes.first().position.y
-        }
-        .onPointerEvent(PointerEventType.Press) {
-            if (it.buttons.isSecondaryPressed) {
-                scope.launch {
-                    showContextMenu(cursorX, cursorY - dockHeight, scope)
-                }
-            }
-        }
-) { /* dock content */ }
-```
-
-### App Menu
-
-> **Important:** use `mutableStateOf` rather than `lateinit var` to hold the bridge reference inside composable content. The composable runs during scene construction before `waylandAppMenu` returns, so `lateinit` will throw `UninitializedPropertyAccessException`.
-
-```kotlin
-suspend fun demoAppMenu(scope: CoroutineScope) {
-    val bridgeRef = mutableStateOf<WaylandBridge?>(null)
-    val bridge = waylandAppMenu(
-        position = ContentPosition.BOTTOM,
-        width    = 500,
-        height   = 350,
-        scope    = scope
-    ) {
-        CompositionLocalProvider(LocalWaylandBridge provides bridgeRef.value) {
-            AppMenuContent()
-        }
-    }
-    bridgeRef.value = bridge
-    bridge.awaitClose()
-}
-
-@Composable
-fun AppMenuContent() {
-    val bridge = LocalWaylandBridge.current
-    Column(
-        Modifier.fillMaxSize().background(Color(0xFF1E1E2E)).padding(16.dp)
-    ) {
-        listOf("Files", "Terminal", "Browser", "Settings").forEach { app ->
-            TextButton(onClick = { bridge?.close() }) {
-                Text(app, color = Color.White)
-            }
-        }
-    }
-}
-```
-
-### Desktop Background
-
-```kotlin
-val bridge = waylandDesktopBackground(scope = scope) {
-    Box(
-        Modifier.fillMaxSize().background(Color(0xFF0D1117)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("My Desktop", color = Color(0xFF58A6FF))
-    }
-}
-```
-
-### Lock Screen
-
-```kotlin
-val bridge = waylandLockScreen(scope = scope) { LockScreenContent() }
-```
-
-Placed on the `OVERLAY` layer with an exclusive keyboard grab.
-
-### Custom Surface
-
-```kotlin
-val bridge = waylandSurface(
-    config = WindowConfig(
-        layer         = WindowLayer.TOP,
-        anchor        = Anchor.RIGHT or Anchor.TOP,
-        exclusiveZone = 0,
-        keyboardMode  = KeyboardMode.ON_DEMAND,
-        width         = 320,
-        height        = 480,
-        margins       = Margins(top = 8, right = 8),
-        namespace     = "my-widget"
-    ),
-    scope = scope
-) { /* content */ }
-```
-
----
-
-## Spawning Multiple Surfaces
-
-Every surface is an independent bridge. Spawn OSDs, context menus, and other surfaces from within any composable using `rememberCoroutineScope`:
-
-```kotlin
-val scope = rememberCoroutineScope()
-
-Button(onClick = {
-    scope.launch { showVolumeOsd(scope) }
-}) {
-    Text("Volume")
-}
-```
-
-> Avoid creating a raw `CoroutineScope(Dispatchers.IO)` inside a composable. It will never be cancelled and will leak. Use `rememberCoroutineScope()` instead, which is cancelled automatically when the composable leaves composition.
-
----
-
-## Configuration Reference
-
-### WindowConfig
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `layer` | `WindowLayer` | `TOP` | Compositor layer |
-| `anchor` | `Int` (bitfield) | `0` | Screen edges to anchor to |
-| `exclusiveZone` | `Int` | `0` | Pixels to reserve along anchored edge |
-| `keyboardMode` | `KeyboardMode` | `NONE` | Keyboard focus behaviour |
-| `width` | `Int` | `0` | Width in logical px (0 = fill axis) |
-| `height` | `Int` | `0` | Height in logical px (0 = fill axis) |
-| `margins` | `Margins` | `Margins.NONE` | Gap between surface and screen edges |
-| `namespace` | `String` | `"virdin-surface"` | Compositor debug identifier |
-| `density` | `Density` | `screenDensity()` | Pixel density for Compose rendering |
-
-### WindowLayer
-
-| Value | Description |
-|---|---|
-| `BACKGROUND` | Behind all windows |
-| `BOTTOM` | Below normal windows |
-| `TOP` | Above normal windows |
-| `OVERLAY` | Above everything |
-
-### Anchor
-
-```kotlin
-Anchor.TOP
-Anchor.BOTTOM
-Anchor.LEFT
-Anchor.RIGHT
-Anchor.ALL     // all four edges, full screen
-Anchor.NONE    // floating, compositor centres the surface
-```
-
-Combine with `or`:
-
-```kotlin
-anchor = Anchor.TOP or Anchor.LEFT or Anchor.RIGHT   // full-width top bar
-anchor = Anchor.BOTTOM or Anchor.RIGHT               // bottom-right corner widget
-```
-
-### KeyboardMode
-
-| Value | Description |
-|---|---|
-| `NONE` | No keyboard focus |
-| `ON_DEMAND` | Focus when clicked |
-| `EXCLUSIVE` | Grab all keyboard input |
-
-### Margins
-
-Gap between the surface and the screen edge on each side.
-
-```kotlin
-Margins.NONE              // no margins (default)
-Margins.all(8)            // 8px on all sides
-Margins.horizontal(24)    // left and right only
-Margins.vertical(4)       // top and bottom only
-Margins(top = 4, right = 8)  // per-side
-```
-
-### ContentPosition
-
-```kotlin
-enum class ContentPosition { TOP, BOTTOM, LEFT, RIGHT }
-```
-
-### ScreenSize
-
-```kotlin
-data class ScreenSize(val width: Float, val height: Float)
-```
-
-Used by `contextMenu` and `ContextMenuConfig` for edge-aware positioning.
-
-### MenuAnchor
-
-Resolved automatically by `ContextMenuConfig.resolvedAnchor`.
-
-```kotlin
-MenuAnchor.TOP_LEFT      // opens right and down (default)
-MenuAnchor.TOP_RIGHT     // opens left and down (near right edge)
-MenuAnchor.BOTTOM_LEFT   // opens right and up (near bottom edge)
-MenuAnchor.BOTTOM_RIGHT  // opens left and up (near bottom-right corner)
-```
-
----
-
-## Keyboard Events
-
-```kotlin
-data class KeyEvent(
-    val keycode:  Int,   // raw evdev keycode
-    val state:    Int,   // 0=released  1=pressed  2=repeated
-    val modifiers: Int,  // bit0=shift  bit1=ctrl  bit2=alt  bit3=super
-    val keysym:   Int    // XKB keysym, layout-aware and unicode-aware
+waylandBridge.configureAsDock(
+    window = window,
+    coroutineScope = scope,
+    position = ContentPosition.BOTTOM, // TOP, BOTTOM, LEFT, RIGHT
+    size = 64
 )
 ```
 
-Use `keysym` for text input (it reflects the user's keyboard layout). Use `keycode` for layout-independent shortcuts such as game controls.
+**Features:**
+- Reserves screen space (exclusive zone)
+- Interactive with on-demand keyboard focus
+- Positioned at screen edges
 
----
+### 2. Panel
 
-## Bridge Lifecycle
-
-```kotlin
-bridge.state          // StateFlow<BridgeState>
-bridge.actualWidth    // compositor-confirmed width in px
-bridge.actualHeight   // compositor-confirmed height in px
-bridge.close()        // destroy surface and free resources
-bridge.awaitClose()   // suspend until close() is called
-```
-
-`BridgeState` transitions: `IDLE -> STARTING -> CONFIGURED -> RUNNING -> CLOSED / ERROR`
-
----
-
-## Utilities
+Create a system panel (taskbar/top bar):
 
 ```kotlin
-// Pass the bridge into nested composables
-val LocalWaylandBridge: ProvidableCompositionLocal<WaylandBridge?>
-
-// Detect HiDPI scale from GDK_SCALE / QT_SCALE_FACTOR, falls back to AWT
-fun screenDensity(): Density
-
-// Override binary source
-BinarySource.Bundled                            // default, extracted from JAR
-BinarySource.Path("/your/path/wayland-helper")  // use an installed binary
+waylandBridge.configureAsPanel(
+    window = window,
+    coroutineScope = scope,
+    position = ContentPosition.TOP,
+    size = 32
+)
 ```
 
----
+**Features:**
+- Reserves screen space
+- No keyboard interaction by default
+- Positioned at screen edges
 
-## HiDPI
+### 3. Desktop Background
 
-`screenDensity()` reads `GDK_SCALE` or `QT_SCALE_FACTOR` environment variables set by most Wayland desktops, then falls back to AWT DPI detection. Override per surface:
+Create a desktop wallpaper/background:
 
 ```kotlin
-waylandDock(density = Density(2f)) { ... }
+waylandBridge.configureAsDesktopBackground(
+    window = window,
+    coroutineScope = scope
+)
 ```
 
----
+**Features:**
+- Sits behind all other windows
+- Full screen coverage
+- No keyboard interaction
+- No exclusive zone (doesn't push other windows)
 
-## Known Limitations
+### 4. Lock Screen
 
-- Single monitor only. Multi-monitor output selection is not yet implemented.
-- No server-side window decorations. Layer shell surfaces cannot have title bars or window chrome. This is a Wayland protocol constraint; decorations are only available on `xdg_toplevel` surfaces.
-- Requires compositor support for `zwlr_layer_shell_v1`
-- `ImageComposeScene` is `@ExperimentalComposeUiApi` and may change across CMP versions
+Create a lock screen overlay:
 
----
+```kotlin
+waylandBridge.configureAsLockScreen(
+    window = window,
+    coroutineScope = scope
+)
+```
+
+**Features:**
+- Overlay layer (above everything)
+- Captures all keyboard input exclusively
+- Full screen coverage
+- Exclusive zone -1 (captures all input)
+
+### 5. OSD (On-Screen Display)
+
+Create notifications or temporary overlays:
+
+```kotlin
+waylandBridge.configureAsOSD(
+    window = window,
+    coroutineScope = scope,
+    width = 300,
+    height = 100
+)
+```
+
+**Features:**
+- Overlay layer
+- Centered on screen (no anchoring)
+- No keyboard interaction
+- No exclusive zone
+- Perfect for volume/brightness indicators
+
+## Configuration Options
+
+### DockPosition Enum
+
+```kotlin
+enum class ContentPosition {
+    TOP,     // Top edge of screen
+    BOTTOM,  // Bottom edge of screen
+    LEFT,    // Left edge of screen
+    RIGHT    // Right edge of screen
+}
+```
+
+### Layer Shell Protocols
+
+The library uses the wlr-layer-shell protocol with these layers (from bottom to top):
+
+1. `LAYER_BACKGROUND` - Desktop backgrounds
+2. `LAYER_BOTTOM` - Below normal windows
+3. `LAYER_TOP` - Panels and docks (default)
+4. `LAYER_OVERLAY` - Lock screens, OSDs, above everything
+
+### Keyboard Interactivity
+
+- `KEYBOARD_INTERACTIVITY_NONE` - No keyboard input
+- `KEYBOARD_INTERACTIVITY_EXCLUSIVE` - Captures all keyboard input
+- `KEYBOARD_INTERACTIVITY_ON_DEMAND` - Keyboard on focus (default for docks)
+
+## Advanced Usage
+
+### Manual Configuration
+
+For complete control, use the low-level `WaylandWindowManager`:
+
+```kotlin
+val manager = WaylandWindowManager()
+if (manager.initialize()) {
+    val surface = manager.createSurface()
+    val layerSurface = manager.createLayerSurface(
+        surface = surface,
+        layer = LayerShellProtocol.LAYER_OVERLAY,
+        anchor = LayerShellProtocol.ANCHOR_TOP or LayerShellProtocol.ANCHOR_LEFT,
+        exclusiveZone = 0,
+        namespace = "my-custom-surface"
+    )
+    
+    // Configure size, anchor, etc.
+    manager.setLayerSurfaceSize(layerSurface, 400, 200)
+    manager.commitSurface(surface)
+}
+```
+
+### Checking Compositor Support
+
+```kotlin
+val nativeWayland = NativeWaylandCalls()
+
+if (!nativeWayland.isWaylandAvailable()) {
+    println("Not running on Wayland")
+} else if (nativeWayland.initialize()) {
+    val manager = nativeWayland.getManager()
+    if (manager?.isLayerShellSupported() == true) {
+        println("Compositor supports wlr-layer-shell")
+    } else {
+        println("Compositor does not support wlr-layer-shell")
+    }
+}
+```
+
+## Architecture
+
+The library is structured in layers:
+
+```
+ComposeWaylandBridge (High-level API)
+         ↓
+WaylandWindowManager (Mid-level protocol handling)
+         ↓
+WaylandClientLib (JNA bindings)
+         ↓
+libwayland-client.so (Native Wayland library)
+```
+
+### Key Components
+
+- **`ComposeWaylandBridge`** - High-level API for Compose Desktop
+- **`WaylandWindowManager`** - Manages Wayland connections and surfaces
+- **`NativeWaylandCalls`** - Initialization and environment detection
+- **`LayerShellProtocol`** - Constants for wlr-layer-shell protocol
+- **`WaylandClientLib`** - JNA interface to libwayland-client
 
 ## Troubleshooting
 
-**Surface not appearing**
+If running under XWayland, the library will fall back to X11 window positioning.
 
-Check that your compositor supports `zwlr_layer_shell_v1`. Confirmed working: Sway, Hyprland, KWin 5.27+.
+### JNA Native Library Issues
 
-**Blurry rendering on HiDPI**
-
-Set `GDK_SCALE=2` (or your scale factor) in your launch script, or pass `density = Density(2f)` explicitly.
-
-**App crashes on rapid clicks**
-
-Wrap your content in `MaterialTheme { }` to give the Compose ripple system a proper context. This is a known CMP issue with `ImageComposeScene`.
-
-**Build fails with `xkbcommon not found`**
-
-Install the development package:
-
+Make sure `libwayland-client.so` is installed:
 ```bash
-# Arch / Manjaro
-sudo pacman -S libxkbcommon
+# Arch Linux
+sudo pacman -S wayland
 
-# Ubuntu / Debian
-sudo apt install libxkbcommon-dev
+# Ubuntu/Debian
+sudo apt install libwayland-client0
 
 # Fedora
-sudo dnf install libxkbcommon-devel
+sudo dnf install wayland
 ```
 
----
+### Window Not Appearing
+
+1. Check compositor logs for errors
+2. Verify the window is created before calling configure methods
+3. Ensure proper cleanup on application exit
+4. Try increasing the delay before configuration:
+   ```kotlin
+   LaunchedEffect(Unit) {
+       delay(200)
+       waylandBridge.configureAsDock(...)
+   }
+   ```
+
+## Examples
+
+See the [examples](examples/) directory for complete working examples:
+
+- **Simple Dock** - Basic dock at screen bottom
+- **Top Panel** - System panel with clock and indicators
+- **Desktop Background** - Animated gradient background
+- **Lock Screen** - Password entry overlay
+- **Volume OSD** - Pop-up volume indicator
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request.
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Development Setup
+
+```bash
+git clone https://github.com/OShane-McKenzie/wayland.git
+cd compose-wayland-interop
+./gradlew build
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built on top of [wlr-layer-shell protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1)
+- Uses [JNA](https://github.com/java-native-access/jna) for native interop
+- Inspired by other Wayland layer shell implementations
+
+## Links
+
+- [JitPack Repository](https://jitpack.io/#OShane-McKenzie/compose-wayland-interop)
+- [Issue Tracker](https://github.com/OShane-McKenzie/compose-wayland-interop/issues)
+- [wlr-layer-shell Protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1)
+- [Jetpack Compose Desktop](https://www.jetbrains.com/lp/compose-desktop/)
+
+---
+
+**Made with ❤️ for the Linux Desktop**
