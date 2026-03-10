@@ -33,7 +33,7 @@ package pkg.virdin.wayland
 //        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
 //        scope.launch {
 //            try {
-//                // demoBottomDock(scope)
+//                 demoBottomDock(scope)
 //                // demoTopPanel(scope)
 //                // demoOsd(scope)
 //                // demoAppMenu(scope)
@@ -48,8 +48,11 @@ package pkg.virdin.wayland
 //    // Block the main thread until the surface is closed
 //    kotlinx.coroutines.runBlocking { done.await() }
 //}
+
 //
-//// ── Bottom dock ───────────────────────────────────────────────────────────────
+// ── Bottom dock ───────────────────────────────────────────────────────────────
+
+
 //suspend fun demoBottomDock(scope: CoroutineScope) {
 //    val bridge = waylandDock(
 //        position = ContentPosition.BOTTOM,
@@ -67,7 +70,8 @@ package pkg.virdin.wayland
 //    }
 //    bridge.awaitClose()
 //}
-//
+
+
 //// ── Top panel ─────────────────────────────────────────────────────────────────
 //suspend fun demoTopPanel(scope: CoroutineScope) {
 //    val bridge = waylandPanel(

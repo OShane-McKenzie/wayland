@@ -6,42 +6,43 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.unit.Density
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import org.jetbrains.skia.*
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalComposeUiApi::class)
 internal class OffScreenRenderer(
-    var width: Int,
-    var height: Int,
+    @Volatile var width: Int,
+    @Volatile var height: Int,
     private val density: Density
 ) {
     private var scene: ImageComposeScene? = null
     private var currentContent: (@Composable () -> Unit)? = null
-    private val pendingEvents = LinkedBlockingQueue<() -> Unit>()
     private val keyEventSource = java.awt.Canvas()
-
-    /*
-     * Reusable surface + canvas for pixel readback.
-     * We render the scene into this surface directly, avoiding the
-     * Image → Bitmap → ByteArray chain that goes through Skia's color
-     * management and introduces softness.
-     */
-    private var surface: Surface? = null
     private var pixelBuf: IntArray = IntArray(width * height)
 
-    private val taskQueue = LinkedBlockingQueue<() -> Unit>()
-    private val thread = Thread({
-        while (!Thread.currentThread().isInterrupted) {
-            try { taskQueue.take().invoke() }
-            catch (e: InterruptedException) { break }
+    private val sceneExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "virdin-scene").apply { isDaemon = true }
+    }
+    private val sceneDispatcher = sceneExecutor.asCoroutineDispatcher()
+
+    fun needsRender(): Boolean = scene != null
+
+    private fun postOnScene(block: () -> Unit) {
+        sceneExecutor.submit {
+            try { block() }
             catch (e: Exception) { System.err.println("[OffScreenRenderer] ${e.message}") }
         }
-    }, "virdin-scene").apply { isDaemon = true; start() }
+    }
 
     private fun <T> runOnScene(block: () -> T): T {
-        val f = java.util.concurrent.CompletableFuture<T>()
-        taskQueue.put { try { f.complete(block()) } catch (e: Exception) { f.completeExceptionally(e) } }
+        val f = CompletableFuture<T>()
+        sceneExecutor.submit {
+            try { f.complete(block()) }
+            catch (e: Exception) { f.completeExceptionally(e) }
+        }
         return f.get()
     }
 
@@ -50,68 +51,31 @@ internal class OffScreenRenderer(
         recreate(content)
     }
 
-    fun render(): IntArray? = runOnScene {
-        val sc = scene ?: return@runOnScene null
-
-        // Drain all pending input events before rendering
-        while (pendingEvents.isNotEmpty()) pendingEvents.poll()?.invoke()
-
-        val image = try {
-            sc.render(System.nanoTime())
+    fun render(): IntArray? {
+        val f = CompletableFuture<IntArray?>()
+        sceneExecutor.submit {
+            try { f.complete(renderInternal()) }
+            catch (e: Exception) {
+                //println("[OffScreenRenderer] render dispatch: ${e::class.simpleName}: ${e.message}")
+                f.complete(null)
+            }
+        }
+        return try {
+            f.get(500, TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
-            return@runOnScene null
+            null
         }
-
-        /*
-         * Read pixels using a Bitmap configured with BGRA_8888 and no
-         * color space. colorSpace=null tells Skia to do a raw copy with
-         * no gamma or color management transform — avoiding the softness
-         * that comes from sRGB↔linear conversion on readback.
-         *
-         * BGRA_8888 with no colorSpace matches WL_SHM_FORMAT_ARGB8888
-         * on little-endian exactly: bytes in memory are B G R A.
-         */
-        val info = ImageInfo(
-            width      = width,
-            height     = height,
-            colorType  = ColorType.BGRA_8888,
-            alphaType  = ColorAlphaType.PREMUL,
-            colorSpace = null   // raw pixel values, no color management
-        )
-        val bitmap = Bitmap()
-        bitmap.allocPixels(info)
-        val ok = image.readPixels(null, bitmap, 0, 0, false)
-        image.close()
-
-        if (!ok) { bitmap.close(); return@runOnScene null }
-
-        // Read as IntArray directly — each Int is already BGRA packed,
-        // which is what SharedFrame.writePixels(IntArray) expects.
-        val bytes = bitmap.readPixels() ?: run { bitmap.close(); return@runOnScene null }
-        bitmap.close()
-
-        val dst = pixelBuf
-        for (i in dst.indices) {
-            val o = i * 4
-            dst[i] = ((bytes[o + 3].toInt() and 0xFF) shl 24) or  // A
-                    ((bytes[o + 2].toInt() and 0xFF) shl 16) or  // R
-                    ((bytes[o + 1].toInt() and 0xFF) shl 8)  or  // G
-                    (bytes[o    ].toInt() and 0xFF)              // B
-        }
-        dst
     }
 
     fun resize(newWidth: Int, newHeight: Int) = runOnScene {
         width    = newWidth
         height   = newHeight
         pixelBuf = IntArray(newWidth * newHeight)
-        surface?.close()
-        surface = null
         currentContent?.let { recreate(it) }
     }
 
-    fun injectPointerEvent(event: PointerEvent) = pendingEvents.put {
-        val sc = scene ?: return@put
+    fun injectPointerEvent(event: PointerEvent) = postOnScene {
+        val sc = scene ?: return@postOnScene
         val type = when (event.type) {
             PtrEventType.ENTER  -> PointerEventType.Enter
             PtrEventType.LEAVE  -> PointerEventType.Exit
@@ -128,30 +92,81 @@ internal class OffScreenRenderer(
                 else -> PointerButtons()
             }
         else PointerButtons()
-
-        sc.sendPointerEvent(type, Offset(event.x, event.y),
+        sc.sendPointerEvent(
+            type, Offset(event.x, event.y),
             timeMillis = System.currentTimeMillis(),
             type       = PointerType.Mouse,
-            buttons    = buttons)
+            buttons    = buttons
+        )
     }
 
-    fun injectKeyEvent(event: KeyEvent) = pendingEvents.put {
-        val sc = scene ?: return@put
-        sc.sendKeyEvent(androidx.compose.ui.input.key.KeyEvent(
-            nativeKeyEvent = java.awt.event.KeyEvent(
-                keyEventSource,
-                if (event.state == 0) java.awt.event.KeyEvent.KEY_RELEASED
-                else                  java.awt.event.KeyEvent.KEY_PRESSED,
-                System.currentTimeMillis(), event.modifiers, event.keycode,
-                java.awt.event.KeyEvent.CHAR_UNDEFINED
+    fun injectKeyEvent(event: KeyEvent) = postOnScene {
+        val sc = scene ?: return@postOnScene
+        sc.sendKeyEvent(
+            androidx.compose.ui.input.key.KeyEvent(
+                nativeKeyEvent = java.awt.event.KeyEvent(
+                    keyEventSource,
+                    if (event.state == 0) java.awt.event.KeyEvent.KEY_RELEASED
+                    else                  java.awt.event.KeyEvent.KEY_PRESSED,
+                    System.currentTimeMillis(), event.modifiers, event.keycode,
+                    java.awt.event.KeyEvent.CHAR_UNDEFINED
+                )
             )
-        ))
+        )
     }
 
     fun close() = runOnScene {
         runCatching { scene?.close() }
-        runCatching { surface?.close() }
-        thread.interrupt()
+        sceneDispatcher.close()
+        sceneExecutor.shutdownNow()
+    }
+
+    private fun renderInternal(): IntArray? {
+        val sc = scene ?: return null
+
+        val image = try {
+            sc.render(System.nanoTime())
+        } catch (e: Exception) {
+            // Print full stack trace so we can see exactly which Skia call fails
+            //println("[OffScreenRenderer] sc.render() EXCEPTION:")
+            e.printStackTrace()
+            return null
+        }
+
+        val info = ImageInfo(
+            width      = width,
+            height     = height,
+            colorType  = ColorType.BGRA_8888,
+            alphaType  = ColorAlphaType.PREMUL,
+            colorSpace = null
+        )
+        val bitmap = Bitmap()
+        bitmap.allocPixels(info)
+        val ok = image.readPixels(null, bitmap, 0, 0, false)
+        image.close()
+
+        if (!ok) {
+            //println("[OffScreenRenderer] readPixels(image→bitmap) failed")
+            bitmap.close()
+            return null
+        }
+
+        val bytes = bitmap.readPixels() ?: run {
+            //println("[OffScreenRenderer] bitmap.readPixels() returned null")
+            bitmap.close()
+            return null
+        }
+        bitmap.close()
+
+        val dst = pixelBuf
+        for (i in dst.indices) {
+            val o = i * 4
+            dst[i] = ((bytes[o + 3].toInt() and 0xFF) shl 24) or
+                    ((bytes[o + 2].toInt() and 0xFF) shl 16) or
+                    ((bytes[o + 1].toInt() and 0xFF) shl 8)  or
+                    (bytes[o    ].toInt() and 0xFF)
+        }
+        return dst
     }
 
     private fun recreate(content: @Composable () -> Unit) {
@@ -160,9 +175,10 @@ internal class OffScreenRenderer(
             width            = width,
             height           = height,
             density          = density,
-            coroutineContext = Dispatchers.Default
+            coroutineContext = sceneDispatcher
         ) {
             androidx.compose.material3.MaterialTheme { content() }
         }
+        //println("[OffScreenRenderer] scene created ${width}x${height}")
     }
 }

@@ -1,5 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
+
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
@@ -26,6 +28,7 @@ kotlin {
             // Lifecycle & ViewModel
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
+            implementation("org.jetbrains.compose.material:material-icons-extended:1.7.3")
         }
 
         commonTest.dependencies {
@@ -44,24 +47,24 @@ kotlin {
     }
 }
 
-//compose.desktop {
-//    application {
-//        mainClass = "pkg.virdin.wayland.MainKt"
-//
-//        nativeDistributions {
-//            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-//            packageName = "pkg.virdin.wayland"
-//            packageVersion = "2.0.2"
-//        }
-//    }
-//}
+compose.desktop {
+    application {
+        mainClass = "pkg.virdin.wayland.MainKt"
+
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            packageName = "pkg.virdin.wayland"
+            packageVersion = "2.0.3"
+        }
+    }
+}
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.0.2"
+            version = "2.0.3"
 
             from(components["kotlin"])
         }

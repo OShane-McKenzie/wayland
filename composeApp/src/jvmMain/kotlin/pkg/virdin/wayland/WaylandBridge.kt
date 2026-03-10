@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.atomic.AtomicBoolean
 
 class WaylandBridge(
     private val scope: CoroutineScope,
@@ -28,7 +28,7 @@ class WaylandBridge(
     @Volatile private var frameSeq: Long    = 0L
     @Volatile private var running:  Boolean = false
 
-    private val renderTrigger = ArrayBlockingQueue<Unit>(1)
+    private val compositorReady = AtomicBoolean(false)
 
     suspend fun configure(config: WindowConfig, content: @Composable () -> Unit) {
         require(_state.value == BridgeState.IDLE) { "Already configured." }
@@ -61,7 +61,7 @@ class WaylandBridge(
 
             actualWidth  = ack.width
             actualHeight = ack.height
-            println("[JVM] Compositor confirmed surface: ${actualWidth}x${actualHeight}")
+            // println("[JVM] Compositor confirmed surface: ${actualWidth}x${actualHeight}")
 
             if (actualWidth != initW || actualHeight != initH) {
                 frame.resize(actualWidth, actualHeight)
@@ -77,7 +77,10 @@ class WaylandBridge(
             recvJob = scope.launch(Dispatchers.IO) {
                 for (event in bridgeSock.incomingEvents) {
                     when (event) {
-                        is FrameDone    -> renderTrigger.offer(Unit)
+                        is FrameDone -> {
+                            //println("[JVM] FRAME_DONE received, seq=${frameSeq}")
+                            compositorReady.set(true)
+                        }
                         is PointerEvent -> rend.injectPointerEvent(event)
                         is KeyEvent     -> rend.injectKeyEvent(event)
                         is ResizeEvent  -> {
@@ -101,17 +104,30 @@ class WaylandBridge(
 
             Thread({
                 while (running) {
-                    try {
-                        renderTrigger.take()
-                    } catch (e: InterruptedException) {
-                        break
+                    if (!compositorReady.compareAndSet(true, false)) {
+                        Thread.sleep(1)
+                        continue
                     }
 
                     if (!running) break
 
-                    val pixels = rend.render() ?: continue
+                    if (!rend.needsRender()) {
+                        compositorReady.set(true)
+                        Thread.sleep(4)
+                        continue
+                    }
+
+                    val pixels = rend.render()
+                    //println("[JVM] render() returned ${if (pixels == null) "null" else "pixels[${pixels.size}] nonzero=${pixels.count { it != 0 }}"}")
+
+                    if (pixels == null) {
+                        compositorReady.set(true)
+                        continue
+                    }
+
                     frame.writePixels(pixels)
                     bridgeSock.send(buildFrameReadyMsg(++frameSeq))
+                    //println("[JVM] sent FRAME_READY seq=${frameSeq}")
                 }
             }, "virdin-render").apply { isDaemon = true; start() }
 
@@ -126,7 +142,6 @@ class WaylandBridge(
 
     fun close() {
         running = false
-        renderTrigger.offer(Unit)
         recvJob?.cancel()
         runCatching { socket?.send(buildShutdownMsg()) }
         runCatching { process?.destroy() }
