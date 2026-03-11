@@ -17,8 +17,8 @@ import java.nio.file.Path
  * directly to a [wl_shm_pool] / [wl_buffer].  No copy is needed.
  */
 internal class SharedFrame(
-    var width: Int,
-    var height: Int
+    var width: Int  = java.awt.Toolkit.getDefaultToolkit().screenSize.width,
+    var height: Int = java.awt.Toolkit.getDefaultToolkit().screenSize.height
 ) {
     private val tmpFile: Path = Files.createTempFile("virdin-frame-", ".raw")
     private var raf: RandomAccessFile = RandomAccessFile(tmpFile.toFile(), "rw")

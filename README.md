@@ -34,6 +34,8 @@ See the full license text at [https://www.gnu.org/licenses/gpl-3.0](https://www.
 - Java 17 or higher
 - Gradle 8.0 or higher
 
+> **Note:** GNOME Shell does not support `zwlr_layer_shell_v1` by default. KDE Plasma requires KWin 5.27 or later.
+
 ---
 
 ## How It Works
@@ -43,7 +45,7 @@ A small C binary (`wayland-helper`) is bundled inside the JAR and extracted at r
 ```
 JVM (Compose/Skia) --socket--> wayland-helper --Wayland--> Compositor
         ^                                                        |
-        +-------------- shared memory (pixels) <----------------+
+        +-------------- shared memory (pixels) <-----------------+
 ```
 
 ---
@@ -65,7 +67,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie:wayland:2.0.3-ALPHA")
+    implementation("com.github.OShane-McKenzie:wayland:2.0.4-ALPHA")
 }
 ```
 
@@ -112,6 +114,8 @@ suspend fun myDock(scope: CoroutineScope) {
     bridge.awaitClose()
 }
 ```
+
+> **Important:** always launch from `SwingUtilities.invokeLater` with a `CoroutineScope(Dispatchers.Swing)`. Compose's internal machinery requires a running AWT event pump. Using `runBlocking` directly on the main thread starts no AWT loop and produces blank frames.
 
 ---
 
@@ -333,7 +337,7 @@ Button(onClick = {
 |---|---|---|---|
 | `layer` | `WindowLayer` | `TOP` | Compositor layer |
 | `anchor` | `Int` (bitfield) | `0` | Screen edges to anchor to |
-| `exclusiveZone` | `Int` | `0` | Pixels to reserve along anchored edge |
+| `exclusiveZone` | `Int` | `0` | Pixels to reserve along anchored edge. `-1` extends into other reserved zones. |
 | `keyboardMode` | `KeyboardMode` | `NONE` | Keyboard focus behaviour |
 | `width` | `Int` | `0` | Width in logical px (0 = fill axis) |
 | `height` | `Int` | `0` | Height in logical px (0 = fill axis) |
@@ -381,10 +385,10 @@ anchor = Anchor.BOTTOM or Anchor.RIGHT               // bottom-right corner widg
 Gap between the surface and the screen edge on each side.
 
 ```kotlin
-Margins.NONE              // no margins (default)
-Margins.all(8)            // 8px on all sides
-Margins.horizontal(24)    // left and right only
-Margins.vertical(4)       // top and bottom only
+Margins.NONE                 // no margins (default)
+Margins.all(8)               // 8px on all sides
+Margins.horizontal(24)       // left and right only
+Margins.vertical(4)          // top and bottom only
 Margins(top = 4, right = 8)  // per-side
 ```
 
@@ -419,10 +423,10 @@ MenuAnchor.BOTTOM_RIGHT  // opens left and up (near bottom-right corner)
 
 ```kotlin
 data class KeyEvent(
-    val keycode:  Int,   // raw evdev keycode
-    val state:    Int,   // 0=released  1=pressed  2=repeated
+    val keycode:   Int,  // raw evdev keycode
+    val state:     Int,  // 0=released  1=pressed  2=repeated
     val modifiers: Int,  // bit0=shift  bit1=ctrl  bit2=alt  bit3=super
-    val keysym:   Int    // XKB keysym, layout-aware and unicode-aware
+    val keysym:    Int   // XKB keysym, layout-aware and unicode-aware
 )
 ```
 
@@ -465,7 +469,7 @@ BinarySource.Path("/your/path/wayland-helper")  // use an installed binary
 `screenDensity()` reads `GDK_SCALE` or `QT_SCALE_FACTOR` environment variables set by most Wayland desktops, then falls back to AWT DPI detection. Override per surface:
 
 ```kotlin
-waylandDock(density = Density(2f)) { ... }
+waylandDock(density = Density(2f)) { /*...*/ }
 ```
 
 ---
@@ -476,6 +480,26 @@ waylandDock(density = Density(2f)) { ... }
 - No server-side window decorations. Layer shell surfaces cannot have title bars or window chrome. This is a Wayland protocol constraint; decorations are only available on `xdg_toplevel` surfaces.
 - Requires compositor support for `zwlr_layer_shell_v1`
 - `ImageComposeScene` is `@ExperimentalComposeUiApi` and may change across CMP versions
+
+---
+
+## Known Issues
+
+### Gradient caveat — desktop Skia vs Android Skia
+
+`Brush.linearGradient` with `end = Offset(Float.MAX_VALUE, Float.MAX_VALUE)` is a common Android pattern for a diagonal gradient that fills any bounds. Android's Skia fork handles infinite coordinates silently. Desktop Skia does not — it returns a null shader pointer and throws `RuntimeException: Can't wrap nullptr` at draw time, crashing the entire render frame.
+
+```kotlin
+// ❌ crashes on desktop Skia
+Brush.linearGradient(
+    colors,
+    start = Offset.Zero,
+    end   = Offset(Float.MAX_VALUE, Float.MAX_VALUE)
+)
+
+// ✅ works everywhere — Compose defaults to top-left → bottom-right
+Brush.linearGradient(colors)
+```
 
 ---
 
@@ -493,7 +517,6 @@ Set `GDK_SCALE=2` (or your scale factor) in your launch script, or pass `density
 
 Wrap your content in `MaterialTheme { }` to give the Compose ripple system a proper context. This is a known CMP issue with `ImageComposeScene`.
 
-**Build fails with `xkbcommon not found`**
 
 Install the development package:
 

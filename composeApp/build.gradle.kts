@@ -47,24 +47,24 @@ kotlin {
     }
 }
 
-compose.desktop {
-    application {
-        mainClass = "pkg.virdin.wayland.MainKt"
-
-        nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "pkg.virdin.wayland"
-            packageVersion = "2.0.3"
-        }
-    }
-}
+//compose.desktop {
+//    application {
+//        mainClass = "pkg.virdin.wayland.MainKt"
+//
+//        nativeDistributions {
+//            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+//            packageName = "pkg.virdin.wayland"
+//            packageVersion = "2.0.4"
+//        }
+//    }
+//}
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.0.3"
+            version = "2.0.4"
 
             from(components["kotlin"])
         }

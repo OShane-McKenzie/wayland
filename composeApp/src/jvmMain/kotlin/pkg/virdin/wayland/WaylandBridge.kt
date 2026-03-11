@@ -49,8 +49,9 @@ class WaylandBridge(
             withTimeoutOrNull(10_000L) { bridgeSock.accept() }
                 ?: error("C binary did not connect within 10 seconds")
 
-            val initW = if (config.width  > 0) config.width  else 1920
-            val initH = if (config.height > 0) config.height else 1080
+            val screenSize = java.awt.Toolkit.getDefaultToolkit().screenSize
+            val initW = if (config.width  > 0) config.width  else screenSize.width
+            val initH = if (config.height > 0) config.height else screenSize.height
             val frame = SharedFrame(initW, initH).also { shm = it }
 
             scope.launch(Dispatchers.IO) { bridgeSock.receiveLoop() }
