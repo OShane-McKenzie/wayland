@@ -65,7 +65,8 @@ package pkg.virdin.wayland
 //                .background(Color(0xCC1E1E2E)),
 //            contentAlignment = Alignment.Center
 //        ) {
-//            Text("🚀  My Dock", color = Color.White)
+//            var text by remember { mutableStateOf("") }
+//            Row(verticalAlignment = Alignment.CenterVertically){ Text("🚀  My Dock", color = Color.White); OutlinedTextField(value = text, {text = it}) }
 //        }
 //    }
 //    bridge.awaitClose()

@@ -16,8 +16,9 @@ internal object MsgType {
     const val PTR_EVENT   = 0x05
     const val KEY_EVENT   = 0x06
     const val RESIZE      = 0x07
-    const val SHUTDOWN    = 0x08
-    const val ERROR       = 0x09
+    const val SHUTDOWN      = 0x08
+    const val ERROR         = 0x09
+    const val CURSOR_CHANGE = 0x0A
 }
 
 internal object PtrEventType {
@@ -32,7 +33,7 @@ internal object PtrEventType {
 
 sealed class WaylandEvent
 
-data class ConfigureAck(val width: Int, val height: Int) : WaylandEvent()
+data class ConfigureAck(val width: Int, val height: Int, val scale: Float = 1f) : WaylandEvent()
 
 data class FrameDone(val seqNum: Long) : WaylandEvent()
 
@@ -105,6 +106,9 @@ internal fun buildConfigureMsg(config: WindowConfig, shmPath: String): ByteArray
 internal fun buildFrameReadyMsg(seqNum: Long): ByteArray =
     buildMessage(MsgType.FRAME_READY) { putLong(seqNum) }
 
+internal fun buildCursorChangeMsg(cursorName: String): ByteArray =
+    buildMessage(MsgType.CURSOR_CHANGE) { putLenString(cursorName) }
+
 internal fun buildShutdownMsg(): ByteArray =
     buildMessage(MsgType.SHUTDOWN) {}
 
@@ -114,8 +118,10 @@ internal fun parseEvent(type: Int, payload: ByteArray): WaylandEvent? {
     val buf = ByteBuffer.wrap(payload).writeLe()
     return when (type) {
         MsgType.CFG_ACK -> {
-            val w = buf.int; val h = buf.int
-            ConfigureAck(w, h)
+            val w = buf.int
+            val h = buf.int
+            val s = if (buf.remaining() >= 4) buf.float else 1f
+            ConfigureAck(w, h, s.coerceAtLeast(1f))
         }
         MsgType.FRAME_DONE -> {
             val seq = buf.long

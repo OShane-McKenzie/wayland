@@ -51,11 +51,23 @@ internal class BridgeSocket {
         println("[JVM] C binary connected")
     }
 
-    /** Send a pre-serialised wire message. */
+    // Guards all writes to the socket — send() is called from multiple threads
+    // (render thread for FRAME_READY, scene thread for CURSOR_CHANGE, etc.)
+    private val sendLock = Object()
+
+    /** Send a pre-serialised wire message. Thread-safe. */
     fun send(bytes: ByteArray) {
         val ch = clientChannel ?: error("Socket not connected")
         val buf = ByteBuffer.wrap(bytes)
-        while (buf.hasRemaining()) ch.write(buf)
+        synchronized(sendLock) {
+            while (buf.hasRemaining()) ch.write(buf)
+        }
+    }
+
+    /** Send a cursor change message to the C binary. */
+    fun sendCursorChange(cursorName: String) {
+        runCatching { send(buildCursorChangeMsg(cursorName)) }
+            .onFailure { System.err.println("[JVM] sendCursorChange failed: ${it.message}") }
     }
 
     /**

@@ -38,6 +38,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 #include "wlr-layer-shell-client-protocol.h"
 
@@ -52,6 +53,7 @@
 #define MSG_RESIZE      0x07
 #define MSG_SHUTDOWN    0x08
 #define MSG_ERROR       0x09
+#define MSG_CURSOR_CHANGE 0x0A
 
 /* Pointer event sub-types */
 #define PTR_ENTER   0
@@ -81,6 +83,7 @@ static struct {
     struct wl_shm                *shm;
     struct zwlr_layer_shell_v1   *layer_shell;
     struct wl_output             *output;
+    int32_t                       output_scale;  /* from wl_output.scale event */
     struct wl_seat               *seat;
     struct wl_pointer            *pointer;
     struct wl_keyboard           *keyboard;
@@ -133,6 +136,12 @@ static struct {
     struct xkb_context *xkb_ctx;
     struct xkb_keymap  *xkb_keymap;
     struct xkb_state   *xkb_state;
+
+    /* Cursor */
+    struct wl_cursor_theme  *cursor_theme;
+    struct wl_surface       *cursor_surface;
+    uint32_t                 ptr_enter_serial;  /* serial from last ptr_enter */
+    char                     pending_cursor[128]; /* cursor name to apply on next motion */
 } state;
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
@@ -252,15 +261,52 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 };
 
 /* ── Pointer listeners ────────────────────────────────────────────────────── */
+/* ── Apply a named cursor via wl_pointer_set_cursor ──────────────────────── */
+static void apply_cursor(const char *name) {
+    if (!state.cursor_theme || !state.cursor_surface || !state.pointer) {
+        printf("[C] apply_cursor(%s) — skipped: theme=%p surf=%p ptr=%p\n",
+               name, (void*)state.cursor_theme,
+               (void*)state.cursor_surface, (void*)state.pointer);
+        return;
+    }
+    struct wl_cursor *cursor = wl_cursor_theme_get_cursor(state.cursor_theme, name);
+    if (!cursor) {
+        printf("[C] apply_cursor: cursor name \"%s\" not found, trying default\n", name);
+        cursor = wl_cursor_theme_get_cursor(state.cursor_theme, "default");
+    }
+    if (!cursor || cursor->image_count == 0) {
+        printf("[C] apply_cursor: no cursor image available\n");
+        return;
+    }
+    struct wl_cursor_image *img = cursor->images[0];
+    struct wl_buffer *buf = wl_cursor_image_get_buffer(img);
+//    printf("[C] apply_cursor(%s) serial=%u hotspot=%d,%d size=%dx%d\n",
+//           name, state.ptr_enter_serial,
+//           (int)img->hotspot_x, (int)img->hotspot_y,
+//           (int)img->width, (int)img->height);
+    wl_pointer_set_cursor(state.pointer, state.ptr_enter_serial,
+                          state.cursor_surface,
+                          (int32_t)img->hotspot_x, (int32_t)img->hotspot_y);
+    wl_surface_attach(state.cursor_surface, buf, 0, 0);
+    wl_surface_damage(state.cursor_surface, 0, 0,
+                      (int32_t)img->width, (int32_t)img->height);
+    wl_surface_commit(state.cursor_surface);
+    wl_display_flush(state.display);
+}
+
 static float g_cursor_x = 0, g_cursor_y = 0;
 
 static void ptr_enter(void *data, struct wl_pointer *ptr,
                       uint32_t serial, struct wl_surface *surf, wl_fixed_t x, wl_fixed_t y)
 {
-    (void)data; (void)ptr; (void)serial; (void)surf;
+    (void)data; (void)surf;
     float fx = (float)wl_fixed_to_double(x);
     float fy = (float)wl_fixed_to_double(y);
     g_cursor_x = fx; g_cursor_y = fy;
+    state.ptr_enter_serial = serial;
+
+    apply_cursor(state.pending_cursor);
+
     uint8_t buf[16];
     int32_t type = PTR_ENTER, btn = 0;
     memcpy(buf,    &type, 4); memcpy(buf+4, &fx, 4);
@@ -287,6 +333,9 @@ static void ptr_motion(void *data, struct wl_pointer *ptr,
     float fx = (float)wl_fixed_to_double(x);
     float fy = (float)wl_fixed_to_double(y);
     g_cursor_x = fx; g_cursor_y = fy;
+    /* Re-apply cursor on every motion — wl_pointer_set_cursor is only reliably
+     * honoured inside Wayland event handlers (enter/motion), not from async IPC. */
+    apply_cursor(state.pending_cursor);
     uint8_t buf[16];
     int32_t type = PTR_MOTION, btn = 0;
     memcpy(buf,    &type, 4); memcpy(buf+4, &fx, 4);
@@ -452,6 +501,32 @@ static const struct wl_seat_listener seat_listener = {
     .name         = seat_name,
 };
 
+/* ── wl_output listener — reads HiDPI scale factor ───────────────────────── */
+static void output_geometry(void *d, struct wl_output *o,
+                            int32_t x, int32_t y, int32_t pw, int32_t ph,
+                            int32_t subpixel, const char *make, const char *model, int32_t transform)
+{ (void)d;(void)o;(void)x;(void)y;(void)pw;(void)ph;(void)subpixel;(void)make;(void)model;(void)transform; }
+
+static void output_mode(void *d, struct wl_output *o,
+                        uint32_t flags, int32_t w, int32_t h, int32_t refresh)
+{ (void)d;(void)o;(void)flags;(void)w;(void)h;(void)refresh; }
+
+static void output_done(void *d, struct wl_output *o)
+{ (void)d;(void)o; }
+
+static void output_scale(void *data, struct wl_output *o, int32_t factor) {
+    (void)data; (void)o;
+    state.output_scale = factor;
+    //printf("[C] wl_output scale = %d\n", factor);
+}
+
+static const struct wl_output_listener output_listener = {
+    .geometry = output_geometry,
+    .mode     = output_mode,
+    .done     = output_done,
+    .scale    = output_scale,
+};
+
 /* ── Registry ─────────────────────────────────────────────────────────────── */
 static void registry_global(void *data, struct wl_registry *reg,
                             uint32_t name, const char *iface, uint32_t version)
@@ -466,7 +541,9 @@ static void registry_global(void *data, struct wl_registry *reg,
         state.layer_shell = wl_registry_bind(reg, name,
                                              &zwlr_layer_shell_v1_interface, (version < 4) ? version : 4);
     } else if (strcmp(iface, wl_output_interface.name) == 0 && !state.output) {
-        state.output = wl_registry_bind(reg, name, &wl_output_interface, 1);
+        state.output = wl_registry_bind(reg, name, &wl_output_interface,
+                                        (version < 2) ? version : 2);
+        wl_output_add_listener(state.output, &output_listener, NULL);
     } else if (strcmp(iface, wl_seat_interface.name) == 0) {
         state.seat = wl_registry_bind(reg, name, &wl_seat_interface,
                                       (version < 5) ? version : 5);
@@ -484,7 +561,10 @@ static const struct wl_registry_listener registry_listener = {
 
 /* ── Fix 2: double-buffer SHM setup ──────────────────────────────────────── */
 static bool setup_shm_buffers(void) {
-    size_t frame_bytes = (size_t)state.width * (size_t)state.height * 4;
+    /* Buffer must be physical pixels = logical * scale */
+    size_t phys_w = (size_t)state.width  * (size_t)state.output_scale;
+    size_t phys_h = (size_t)state.height * (size_t)state.output_scale;
+    size_t frame_bytes = phys_w * phys_h * 4;
 
     /* Tear down existing resources */
     if (state.pixels) {
@@ -526,7 +606,8 @@ static bool setup_shm_buffers(void) {
     state.shm_pool = wl_shm_create_pool(state.shm, state.shm_fd, (int32_t)frame_bytes);
 
     state.slots[0].buf = wl_shm_pool_create_buffer(state.shm_pool, 0,
-                                                   state.width, state.height, state.width * 4, WL_SHM_FORMAT_ARGB8888);
+                                                   (int32_t)phys_w, (int32_t)phys_h,
+                                                   (int32_t)phys_w * 4, WL_SHM_FORMAT_ARGB8888);
     state.slots[0].released = true;
     wl_buffer_add_listener(state.slots[0].buf, &buf_listener_0, NULL);
 
@@ -578,6 +659,9 @@ static bool handle_configure_msg(const uint8_t *payload, uint32_t len) {
            cfg.layer, cfg.anchor, cfg.exclusive_zone,
            cfg.keyboard_interactivity, cfg.width, cfg.height, ns, shm_path);
 
+    /* state.width/height are logical pixels — what the compositor works with.
+     * The physical buffer size is width*scale × height*scale, handled in
+     * setup_shm_buffers() which multiplies by output_scale internally. */
     state.width  = cfg.width;
     state.height = cfg.height;
 
@@ -639,17 +723,24 @@ static bool handle_configure_msg(const uint8_t *payload, uint32_t len) {
 
     /* Commit blank frame to make surface visible, then register frame callback */
     memset(state.pixels, 0, state.total_bytes);
+    /* Tell compositor our buffer is at output_scale pixels per surface unit */
+    wl_surface_set_buffer_scale(state.surface, state.output_scale);
     wl_surface_attach(state.surface, state.slots[0].buf, 0, 0);
     state.slots[0].released = false;
-    wl_surface_damage_buffer(state.surface, 0, 0, state.width, state.height);
+    wl_surface_damage_buffer(state.surface, 0, 0,
+                             state.width  * state.output_scale,
+                             state.height * state.output_scale);
     register_frame_callback();
     wl_surface_commit(state.surface);
     wl_display_flush(state.display);
 
-    uint8_t ack[8];
+    /* Include output scale in ack so JVM can build the correct Density. */
+    float scale_f = (float)state.output_scale;
+    uint8_t ack[12];
     memcpy(ack,   &state.width,  4);
     memcpy(ack+4, &state.height, 4);
-    return send_msg(state.sock_fd, MSG_CFG_ACK, ack, 8);
+    memcpy(ack+8, &scale_f,      4);
+    return send_msg(state.sock_fd, MSG_CFG_ACK, ack, 12);
 }
 
 /* ── Fix 5: handle pending resize ────────────────────────────────────────── */
@@ -670,9 +761,12 @@ static void apply_resize(void) {
 
     /* Commit blank frame at new size */
     memset(state.pixels, 0, state.total_bytes);
+    wl_surface_set_buffer_scale(state.surface, state.output_scale);
     wl_surface_attach(state.surface, state.slots[0].buf, 0, 0);
     state.slots[0].released = false;
-    wl_surface_damage_buffer(state.surface, 0, 0, state.width, state.height);
+    wl_surface_damage_buffer(state.surface, 0, 0,
+                             state.width  * state.output_scale,
+                             state.height * state.output_scale);
     register_frame_callback();
     wl_surface_commit(state.surface);
     wl_display_flush(state.display);
@@ -697,8 +791,11 @@ static bool handle_frame_ready(const uint8_t *payload, uint32_t len) {
      * time we get here. Just always commit.
      */
     state.slots[0].released = false;
+    wl_surface_set_buffer_scale(state.surface, state.output_scale);
     wl_surface_attach(state.surface, state.slots[0].buf, 0, 0);
-    wl_surface_damage_buffer(state.surface, 0, 0, state.width, state.height);
+    wl_surface_damage_buffer(state.surface, 0, 0,
+                             state.width  * state.output_scale,
+                             state.height * state.output_scale);
 
     if (!state.frame_callback_pending) {
         register_frame_callback();
@@ -706,6 +803,21 @@ static bool handle_frame_ready(const uint8_t *payload, uint32_t len) {
 
     wl_surface_commit(state.surface);
     wl_display_flush(state.display);
+    return true;
+}
+
+/* ── Handle MSG_CURSOR_CHANGE from JVM ───────────────────────────────────── */
+static bool handle_cursor_change(const uint8_t *payload, uint32_t len) {
+    if (len < 4) return true;
+    uint32_t name_len;
+    memcpy(&name_len, payload, 4);
+    if (name_len == 0 || 4 + name_len > len) return true;
+
+    memset(state.pending_cursor, 0, sizeof(state.pending_cursor));
+    memcpy(state.pending_cursor, payload + 4,
+           name_len < sizeof(state.pending_cursor) - 1
+           ? name_len : sizeof(state.pending_cursor) - 1);
+    printf("[C] MSG_CURSOR_CHANGE → pending=\"%s\"\n", state.pending_cursor);
     return true;
 }
 
@@ -727,8 +839,9 @@ static bool dispatch_jvm_message(void) {
 
     bool ok = true;
     switch (hdr.type) {
-        case MSG_CONFIGURE:  ok = handle_configure_msg(payload, hdr.len); break;
-        case MSG_FRAME_READY: ok = handle_frame_ready(payload, hdr.len);  break;
+        case MSG_CONFIGURE:    ok = handle_configure_msg(payload, hdr.len); break;
+        case MSG_FRAME_READY:  ok = handle_frame_ready(payload, hdr.len);  break;
+        case MSG_CURSOR_CHANGE: ok = handle_cursor_change(payload, hdr.len); break;
         case MSG_SHUTDOWN:
             printf("[C] SHUTDOWN received\n");
             state.running = false;
@@ -755,6 +868,8 @@ int main(int argc, char **argv) {
 
     /* Fix 1: initialise shm_fd to -1 so cleanup never closes fd 0 */
     state.shm_fd = -1;
+    state.output_scale = 1;  /* default; overwritten by wl_output.scale event */
+    strncpy(state.pending_cursor, "default", sizeof(state.pending_cursor) - 1);
 
     /* Fix 6: initialise xkbcommon context */
     state.xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
@@ -791,6 +906,19 @@ int main(int argc, char **argv) {
     if (!state.compositor) { send_error(state.sock_fd, 11, "wl_compositor not available"); return 1; }
     if (!state.shm)        { send_error(state.sock_fd, 12, "wl_shm not available");        return 1; }
     if (!state.layer_shell){ send_error(state.sock_fd, 13, "zwlr_layer_shell_v1 not available"); return 1; }
+
+    /* Cursor setup — 24px is a safe default; honour XCURSOR_SIZE if set */
+    int cursor_size = 24;
+    const char *cursor_size_env = getenv("XCURSOR_SIZE");
+    if (cursor_size_env) cursor_size = atoi(cursor_size_env);
+    if (cursor_size <= 0) cursor_size = 24;
+
+    state.cursor_theme   = wl_cursor_theme_load(NULL, cursor_size, state.shm);
+    state.cursor_surface = wl_compositor_create_surface(state.compositor);
+    if (!state.cursor_theme)
+        fprintf(stderr, "[C] Warning: could not load cursor theme\n");
+    else
+        printf("[C] cursor theme loaded OK (size=%d)\n", cursor_size);
 
     printf("[C] Wayland globals bound. Waiting for CONFIGURE...\n");
 
@@ -852,7 +980,9 @@ int main(int argc, char **argv) {
     if (state.shm_pool)      wl_shm_pool_destroy(state.shm_pool);
     if (state.layer_surface) zwlr_layer_surface_v1_destroy(state.layer_surface);
     if (state.surface)       wl_surface_destroy(state.surface);
-    if (state.pointer)       wl_pointer_destroy(state.pointer);
+    if (state.cursor_surface) wl_surface_destroy(state.cursor_surface);
+    if (state.cursor_theme)   wl_cursor_theme_destroy(state.cursor_theme);
+    if (state.pointer)        wl_pointer_destroy(state.pointer);
     if (state.keyboard)      wl_keyboard_destroy(state.keyboard);
     if (state.seat)          wl_seat_destroy(state.seat);
     if (state.layer_shell)   zwlr_layer_shell_v1_destroy(state.layer_shell);

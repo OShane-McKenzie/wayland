@@ -5,14 +5,15 @@ set(CMAKE_C_STANDARD 11)
 # ── Dependencies ──────────────────────────────────────────────────────────────
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
+pkg_check_modules(WAYLAND_CURSOR REQUIRED wayland-cursor)
 pkg_check_modules(XKBCOMMON      REQUIRED xkbcommon)
+
 find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
 
 # ── Generate wlr-layer-shell protocol glue code ───────────────────────────────
 set(LAYER_XML    "${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-layer-shell-unstable-v1.xml")
 set(LAYER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/wlr-layer-shell-client-protocol.h")
 set(LAYER_SRC    "${CMAKE_CURRENT_BINARY_DIR}/wlr-layer-shell-protocol.c")
-
 add_custom_command(
     OUTPUT ${LAYER_HEADER}
     COMMAND ${WAYLAND_SCANNER} client-header ${LAYER_XML} ${LAYER_HEADER}
@@ -30,7 +31,6 @@ add_custom_command(
 set(XDG_XML    "/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml")
 set(XDG_HEADER "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.h")
 set(XDG_SRC    "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.c")
-
 add_custom_command(
     OUTPUT ${XDG_HEADER}
     COMMAND ${WAYLAND_SCANNER} client-header ${XDG_XML} ${XDG_HEADER}
@@ -55,22 +55,24 @@ add_executable(wayland-helper
     ${LAYER_SRC}
     ${XDG_SRC}
 )
-
 add_dependencies(wayland-helper wayland-protocols)
 
 target_include_directories(wayland-helper PRIVATE
     ${WAYLAND_CLIENT_INCLUDE_DIRS}
+    ${WAYLAND_CURSOR_INCLUDE_DIRS}
     ${XKBCOMMON_INCLUDE_DIRS}
     ${CMAKE_CURRENT_BINARY_DIR}   # where generated headers live
 )
 
 target_link_libraries(wayland-helper
     ${WAYLAND_CLIENT_LIBRARIES}
+    ${WAYLAND_CURSOR_LIBRARIES}
     ${XKBCOMMON_LIBRARIES}
 )
 
 target_compile_options(wayland-helper PRIVATE
     ${WAYLAND_CLIENT_CFLAGS_OTHER}
+    ${WAYLAND_CURSOR_CFLAGS_OTHER}
     ${XKBCOMMON_CFLAGS_OTHER}
     -Wall -Wextra -O2
 )
