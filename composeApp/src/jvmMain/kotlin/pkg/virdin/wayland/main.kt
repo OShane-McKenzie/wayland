@@ -15,14 +15,14 @@ package pkg.virdin.wayland
 //import kotlinx.coroutines.*
 //import kotlinx.coroutines.swing.Swing
 //import javax.swing.SwingUtilities
-
-
-//@OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
-//val mySceneFactory = VirdinSceneFactory { coroutineContext ->
-//    val scene    = ImageComposeScene(actualWidth, actualHeight, surfaceDensity, coroutineContext)
+//
+//
+//
+//lateinit var bridge: WaylandBridge
+//@OptIn(InternalComposeUiApi::class, ExperimentalComposeUiApi::class)
+//val onSceneReady: (ImageComposeScene) -> Unit = { scene ->
 //    val ctx      = SceneContextAccessor.getContext(scene)
 //    val existing = SceneContextAccessor.getPlatformContext(ctx)
-//
 //    SceneContextAccessor.putDelegate(ctx, object : PlatformContext by existing {
 //        override suspend fun startInputMethod(
 //            request: PlatformTextInputMethodRequest
@@ -31,30 +31,27 @@ package pkg.virdin.wayland
 //                onEditCommand = request.onEditCommand,
 //                onImeAction   = request.onImeAction ?: {}
 //            )
-//            notifyInputSession(session)
+//            bridge.notifyInputSession(session)
 //            try {
 //                suspendCancellableCoroutine<Nothing> { cont ->
-//                    cont.invokeOnCancellation { notifyInputSession(null) }
+//                    cont.invokeOnCancellation { bridge.notifyInputSession(null) }
 //                }
 //            } finally {
-//                notifyInputSession(null)
+//                bridge.notifyInputSession(null)
 //            }
 //        }
 //    })
-//    scene
 //}
 //
 //suspend fun demoBottomDock(scope: CoroutineScope) {
-//    val bridge = waylandDock(
+//    bridge = waylandDock(
 //        position     = ContentPosition.BOTTOM,
 //        size         = 64,
-//        sceneFactory = mySceneFactory,
+//        onSceneReady = onSceneReady,
 //        scope        = scope
 //    ) {
 //        Box(
-//            modifier = Modifier
-//                .fillMaxSize()
-//                .background(Color(0xCC1E1E2E)),
+//            modifier = Modifier.fillMaxSize().background(Color(0xCC1E1E2E)),
 //            contentAlignment = Alignment.Center
 //        ) {
 //            var text by remember { mutableStateOf("") }
@@ -66,7 +63,7 @@ package pkg.virdin.wayland
 //    }
 //    bridge.awaitClose()
 //}
-//
+////
 //fun main() {
 //    val done = CompletableDeferred<Unit>()
 //

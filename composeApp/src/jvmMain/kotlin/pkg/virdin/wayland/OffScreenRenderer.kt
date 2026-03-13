@@ -32,9 +32,10 @@ internal class OffScreenRenderer(
     @Volatile var width: Int,
     @Volatile var height: Int,
     private val density: Density,
-    private val bridge: WaylandBridge,
     private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null,
-    private val sceneFactory: VirdinSceneFactory? = null
+    // Called after setContent() on every new ImageComposeScene instance,
+    // including after resize. Use this to inject PlatformContext.
+    private val onSceneReady: ((ImageComposeScene) -> Unit)? = null
 ) {
     private var scene: ImageComposeScene? = null
     private var currentContent: (@Composable () -> Unit)? = null
@@ -277,6 +278,8 @@ internal class OffScreenRenderer(
         return dst
     }
 
+    // ── Pointer icon ──────────────────────────────────────────────────────────
+
     private fun pointerIconToCursorName(icon: androidx.compose.ui.input.pointer.PointerIcon): String {
         return try {
             val cursorField = icon.javaClass.declaredFields
@@ -302,10 +305,6 @@ internal class OffScreenRenderer(
             }
         } catch (e: Exception) { "default" }
     }
-
-    // ── Pointer icon injection ────────────────────────────────────────────────
-    // Only overrides setPointerIcon — does not touch startInputMethod.
-    // Reading a field value (not writing final) so Java 17 rules do not apply.
 
     @OptIn(InternalComposeUiApi::class)
     private fun makePlatformContext(
@@ -342,26 +341,23 @@ internal class OffScreenRenderer(
         inputSession = null
         repeatJob?.cancel()
 
-        val sc: ImageComposeScene = if (sceneFactory != null) {
-            // Factory path: consumer constructs scene and injects startInputMethod
-            // in their own module where the VarHandle write is permitted.
-            // Library then wraps the result to add setPointerIcon on top.
-            val userScene = with(sceneFactory) { bridge.create(sceneDispatcher) }
-            injectPlatformContext(userScene)
-            userScene
-        } else {
-            // Default path: no IME support. Pointer icon still works.
-            val defaultScene = ImageComposeScene(
-                width            = width,
-                height           = height,
-                density          = density,
-                coroutineContext = sceneDispatcher
-            )
-            injectPlatformContext(defaultScene)
-            defaultScene
-        }
+        val sc = ImageComposeScene(
+            width            = width,
+            height           = height,
+            density          = density,
+            coroutineContext = sceneDispatcher
+        )
 
+        // Set content first — fully initializes _platformContext internals.
         sc.setContent { androidx.compose.material3.MaterialTheme { content() } }
+
+        // Inject pointer icon — reads existing delegate, safe after setContent.
+        injectPlatformContext(sc)
+
+        // Notify consumer after scene is fully initialized and content is set.
+        // Safe to call putDelegate here — _platformContext is fully set up.
+        onSceneReady?.invoke(sc)
+
         scene = sc
         focusInitialized = false
     }

@@ -44,9 +44,9 @@ object SceneContextAccessor {
         unsafeField.isAccessible = true
         val unsafe = unsafeField.get(null)
 
-        val field  = getDelegateField(ctx)
+        val field        = getDelegateField(ctx)
         val offsetMethod = unsafe.javaClass.getMethod("objectFieldOffset", Field::class.java)
-        val offset = offsetMethod.invoke(unsafe, field) as Long
+        val offset       = offsetMethod.invoke(unsafe, field) as Long
 
         val putMethod = unsafe.javaClass.getMethod(
             "putObject",

@@ -1,6 +1,8 @@
 package pkg.virdin.wayland
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,12 +19,8 @@ class WaylandBridge(
     private val _state = MutableStateFlow(BridgeState.IDLE)
     val state: StateFlow<BridgeState> = _state
 
-    // Physical pixel dimensions — set after CONFIGURE_ACK, read-only to callers.
     var actualWidth:  Int = 0; private set
     var actualHeight: Int = 0; private set
-
-    // Density derived from wl_output scale — exposed for VirdinSceneFactory implementations.
-    var surfaceDensity: Density = Density(1f); private set
 
     private var socket:   BridgeSocket?      = null
     private var shm:      SharedFrame?       = null
@@ -36,17 +34,18 @@ class WaylandBridge(
     private val renderTrigger = ArrayBlockingQueue<Unit>(1)
 
     /**
-     * Called from inside a [VirdinSceneFactory] implementation's injected
-     * PlatformContext.startInputMethod to hand the active input session to
-     * the library. Pass null to close the session.
+     * Called by the consumer's [onSceneReady] callback to hand the active
+     * input session back to the library.
+     * Pass null to close the session.
      */
     fun notifyInputSession(session: VirdinInputSession?) {
         renderer?.inputSession = session
     }
 
+    @OptIn(ExperimentalComposeUiApi::class)
     suspend fun configure(
         config:       WindowConfig,
-        sceneFactory: VirdinSceneFactory? = null,
+        onSceneReady: ((ImageComposeScene) -> Unit)? = null,
         content:      @Composable () -> Unit
     ) {
         require(_state.value == BridgeState.IDLE) { "Already configured." }
@@ -84,7 +83,6 @@ class WaylandBridge(
             val physH        = (ack.height * scale).toInt()
             actualWidth      = physW
             actualHeight     = physH
-            surfaceDensity   = density
             println("[JVM] surface: ${ack.width}x${ack.height} logical, ${physW}x${physH} physical, scale=$scale")
 
             if (physW != overW || physH != overH) {
@@ -95,9 +93,8 @@ class WaylandBridge(
                 width                = actualWidth,
                 height               = actualHeight,
                 density              = density,
-                bridge               = this,
                 onPointerIconChanged = { cursorName -> bridgeSock.sendCursorChange(cursorName) },
-                sceneFactory         = sceneFactory
+                onSceneReady         = onSceneReady
             ).also { renderer = it }
             rend.setContent(content)
 
