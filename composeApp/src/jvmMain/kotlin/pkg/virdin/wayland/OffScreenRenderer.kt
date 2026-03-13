@@ -312,7 +312,7 @@ internal class OffScreenRenderer(
         object : androidx.compose.ui.platform.PlatformContext by base {
             override fun setPointerIcon(pointerIcon: androidx.compose.ui.input.pointer.PointerIcon) {
                 val cursorName = pointerIconToCursorName(pointerIcon)
-                //println("[OffScreenRenderer] pointer icon → $cursorName")
+                println("[OffScreenRenderer] pointer icon → $cursorName")
                 onPointerIconChanged?.invoke(cursorName)
             }
 
@@ -350,8 +350,22 @@ internal class OffScreenRenderer(
             val delegateField = ctx.javaClass.getDeclaredField("\$\$delegate_0")
             delegateField.isAccessible = true
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
+            val replacement = makePlatformContext(existing)
 
-            delegateField.set(ctx, makePlatformContext(existing))
+            // Use MethodHandles unrestricted lookup to write final fields —
+            // works both as app and as library JAR on modern JVMs.
+            try {
+                val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
+                    ctx.javaClass,
+                    java.lang.invoke.MethodHandles.lookup()
+                )
+                val handle = lookup.unreflectSetter(delegateField)
+                handle.invoke(ctx, replacement)
+            } catch (mhEx: Exception) {
+                // Fallback: direct set (works if JVM allows it)
+                delegateField.set(ctx, replacement)
+            }
+
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {
             println("[OffScreenRenderer] PlatformContext injection failed: ${e.message}")
