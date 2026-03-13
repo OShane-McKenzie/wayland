@@ -5,7 +5,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.platform.PlatformScreenReader
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.*
@@ -308,12 +310,35 @@ internal class OffScreenRenderer(
     @OptIn(InternalComposeUiApi::class)
     private fun makePlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
-    ): androidx.compose.ui.platform.PlatformContext =
-        object : androidx.compose.ui.platform.PlatformContext by base {
+    ): androidx.compose.ui.platform.PlatformContext {
+        // Capture everything we need as local vals so the anonymous object
+        // holds no reference to the outer OffScreenRenderer instance via
+        // Kotlin's "by base" delegation (which adds its own $$delegate_0 field
+        // and can NPE when accessed from a library JAR context).
+        val capturedWindowInfo    = base.windowInfo
+        val capturedIconChanged   = onPointerIconChanged
+        val capturedIconConverter = ::pointerIconToCursorName
+        val sessionRef            = object {
+            @Volatile var value: VirdinInputSession? = null
+        }
+        // Mirror sessionRef into the outer field on set
+        val setSession: (VirdinInputSession?) -> Unit = { s ->
+            sessionRef.value = s
+            inputSession = s
+        }
+
+        return object : androidx.compose.ui.platform.PlatformContext {
+            override val windowInfo get() = capturedWindowInfo
+            override val screenReader: PlatformScreenReader
+                get() = base.screenReader
+
+            override val inputModeManager: InputModeManager
+                get() = base.inputModeManager
+
             override fun setPointerIcon(pointerIcon: androidx.compose.ui.input.pointer.PointerIcon) {
-                val cursorName = pointerIconToCursorName(pointerIcon)
+                val cursorName = capturedIconConverter(pointerIcon)
                 println("[OffScreenRenderer] pointer icon → $cursorName")
-                onPointerIconChanged?.invoke(cursorName)
+                capturedIconChanged?.invoke(cursorName)
             }
 
             override suspend fun startInputMethod(
@@ -323,22 +348,23 @@ internal class OffScreenRenderer(
                     onEditCommand = request.onEditCommand,
                     onImeAction   = request.onImeAction ?: {}
                 )
-                inputSession = session
+                setSession(session)
                 println("[OffScreenRenderer] startInputMethod — input session open")
                 try {
                     suspendCancellableCoroutine<Nothing> { cont ->
                         cont.invokeOnCancellation {
-                            if (inputSession === session) {
-                                inputSession = null
+                            if (sessionRef.value === session) {
+                                setSession(null)
                                 println("[OffScreenRenderer] input session closed")
                             }
                         }
                     }
                 } finally {
-                    if (inputSession === session) inputSession = null
+                    if (sessionRef.value === session) setSession(null)
                 }
             }
         }
+    }
 
     @OptIn(InternalComposeUiApi::class)
     private fun injectPlatformContext(sc: ImageComposeScene) {
