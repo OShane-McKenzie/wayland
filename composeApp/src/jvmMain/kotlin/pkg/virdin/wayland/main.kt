@@ -1,18 +1,18 @@
 package pkg.virdin.wayland
 //
-//import androidx.compose.foundation.background
-//import androidx.compose.foundation.layout.*
-//import androidx.compose.material3.*
-//import androidx.compose.runtime.*
-//import androidx.compose.ui.Alignment
-//import androidx.compose.ui.Modifier
-//import androidx.compose.ui.graphics.Color
-//import androidx.compose.ui.unit.Density
-//import androidx.compose.ui.unit.dp
-//import kotlinx.coroutines.*
-//import kotlinx.coroutines.swing.Swing
-//import pkg.virdin.wayland.*
-//import javax.swing.SwingUtilities
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.*
+import kotlinx.coroutines.swing.Swing
+import pkg.virdin.wayland.*
+import javax.swing.SwingUtilities
 //
 //// ── Entry point ───────────────────────────────────────────────────────────────
 ////
@@ -26,51 +26,50 @@ package pkg.virdin.wayland
 ////   CoroutineScope(Dispatchers.Swing)  →  coroutines run on that same EDT
 ////   done.await()  →  main thread sleeps until bridge.close() is called
 //
-//fun main() {
-//    val done = CompletableDeferred<Unit>()
-//
-//    SwingUtilities.invokeLater {
-//        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
-//        scope.launch {
-//            try {
-//                 demoBottomDock(scope)
-//                // demoTopPanel(scope)
-//                // demoOsd(scope)
-//                // demoAppMenu(scope)
-//                // demoDesktopBackground(scope)
-//                // demoGenericWindow(scope)
-//            } finally {
-//                done.complete(Unit)
-//            }
-//        }
-//    }
-//
-//    // Block the main thread until the surface is closed
-//    kotlinx.coroutines.runBlocking { done.await() }
-//}
+fun main() {
+    val done = CompletableDeferred<Unit>()
+
+    SwingUtilities.invokeLater {
+        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
+        scope.launch {
+            try {
+                 demoBottomDock(scope)
+                // demoTopPanel(scope)
+                // demoOsd(scope)
+                // demoAppMenu(scope)
+                // demoDesktopBackground(scope)
+                // demoGenericWindow(scope)
+            } finally {
+                done.complete(Unit)
+            }
+        }
+    }
+
+    // Block the main thread until the surface is closed
+    kotlinx.coroutines.runBlocking { done.await() }
+}
 
 //
 // ── Bottom dock ───────────────────────────────────────────────────────────────
 
-
-//suspend fun demoBottomDock(scope: CoroutineScope) {
-//    val bridge = waylandDock(
-//        position = ContentPosition.BOTTOM,
-//        size     = 64,
-//        scope    = scope
-//    ) {
-//        Box(
-//            modifier = Modifier
-//                .fillMaxSize()
-//                .background(Color(0xCC1E1E2E)),
-//            contentAlignment = Alignment.Center
-//        ) {
-//            var text by remember { mutableStateOf("") }
-//            Row(verticalAlignment = Alignment.CenterVertically){ Text("🚀  My Dock", color = Color.White); OutlinedTextField(value = text, {text = it}) }
-//        }
-//    }
-//    bridge.awaitClose()
-//}
+suspend fun demoBottomDock(scope: CoroutineScope) {
+    val bridge = waylandDock(
+        position = ContentPosition.BOTTOM,
+        size     = 64,
+        scope    = scope
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xCC1E1E2E)),
+            contentAlignment = Alignment.Center
+        ) {
+            var text by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically){ Text("🚀  My Dock", color = Color.White); OutlinedTextField(value = text, {text = it}) }
+        }
+    }
+    bridge.awaitClose()
+}
 
 
 //// ── Top panel ─────────────────────────────────────────────────────────────────

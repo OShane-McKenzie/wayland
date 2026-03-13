@@ -5,9 +5,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.pointer.*
-import androidx.compose.ui.platform.PlatformScreenReader
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.*
@@ -114,6 +112,7 @@ internal class OffScreenRenderer(
             else                  PointerEventType.Release
             else                -> PointerEventType.Unknown
         }
+
         if (event.type == PtrEventType.BUTTON) {
             val pressed = event.state == 1
             currentButtons = when (event.button) {
@@ -129,12 +128,14 @@ internal class OffScreenRenderer(
                 else -> currentButtons
             }
         }
+
         sc.sendPointerEvent(
             type, Offset(event.x, event.y),
             timeMillis = System.currentTimeMillis(),
             type       = PointerType.Mouse,
             buttons    = currentButtons
         )
+
     }
 
     @OptIn(InternalComposeUiApi::class)
@@ -260,6 +261,7 @@ internal class OffScreenRenderer(
             alphaType  = ColorAlphaType.PREMUL,
             colorSpace = null
         )
+
         val bitmap = Bitmap()
         bitmap.allocPixels(info)
         val ok = image.readPixels(null, bitmap, 0, 0, false)
@@ -310,35 +312,12 @@ internal class OffScreenRenderer(
     @OptIn(InternalComposeUiApi::class)
     private fun makePlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
-    ): androidx.compose.ui.platform.PlatformContext {
-        // Capture everything we need as local vals so the anonymous object
-        // holds no reference to the outer OffScreenRenderer instance via
-        // Kotlin's "by base" delegation (which adds its own $$delegate_0 field
-        // and can NPE when accessed from a library JAR context).
-        val capturedWindowInfo    = base.windowInfo
-        val capturedIconChanged   = onPointerIconChanged
-        val capturedIconConverter = ::pointerIconToCursorName
-        val sessionRef            = object {
-            @Volatile var value: VirdinInputSession? = null
-        }
-        // Mirror sessionRef into the outer field on set
-        val setSession: (VirdinInputSession?) -> Unit = { s ->
-            sessionRef.value = s
-            inputSession = s
-        }
-
-        return object : androidx.compose.ui.platform.PlatformContext {
-            override val windowInfo get() = capturedWindowInfo
-            override val screenReader: PlatformScreenReader
-                get() = base.screenReader
-
-            override val inputModeManager: InputModeManager
-                get() = base.inputModeManager
-
+    ): androidx.compose.ui.platform.PlatformContext =
+        object : androidx.compose.ui.platform.PlatformContext by base {
             override fun setPointerIcon(pointerIcon: androidx.compose.ui.input.pointer.PointerIcon) {
-                val cursorName = capturedIconConverter(pointerIcon)
+                val cursorName = pointerIconToCursorName(pointerIcon)
                 println("[OffScreenRenderer] pointer icon → $cursorName")
-                capturedIconChanged?.invoke(cursorName)
+                onPointerIconChanged?.invoke(cursorName)
             }
 
             override suspend fun startInputMethod(
@@ -348,23 +327,22 @@ internal class OffScreenRenderer(
                     onEditCommand = request.onEditCommand,
                     onImeAction   = request.onImeAction ?: {}
                 )
-                setSession(session)
+                inputSession = session
                 println("[OffScreenRenderer] startInputMethod — input session open")
                 try {
                     suspendCancellableCoroutine<Nothing> { cont ->
                         cont.invokeOnCancellation {
-                            if (sessionRef.value === session) {
-                                setSession(null)
+                            if (inputSession === session) {
+                                inputSession = null
                                 println("[OffScreenRenderer] input session closed")
                             }
                         }
                     }
                 } finally {
-                    if (sessionRef.value === session) setSession(null)
+                    if (inputSession === session) inputSession = null
                 }
             }
         }
-    }
 
     @OptIn(InternalComposeUiApi::class)
     private fun injectPlatformContext(sc: ImageComposeScene) {
@@ -378,18 +356,17 @@ internal class OffScreenRenderer(
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
             val replacement = makePlatformContext(existing)
 
-            // Unsafe.putObject bypasses declared-type checks on the field,
-            // which is necessary because the field is typed as the concrete
-            // PlatformContext$Empty class, not the PlatformContext interface.
-            @Suppress("DEPRECATION")
-            val unsafeField = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe")
-            unsafeField.isAccessible = true
-            @Suppress("DEPRECATION")
-            val unsafe = unsafeField.get(null) as sun.misc.Unsafe
-            @Suppress("DEPRECATION")
-            val offset = unsafe.objectFieldOffset(delegateField)
-            @Suppress("DEPRECATION")
-            unsafe.putObject(ctx, offset, replacement)
+            // MethodHandles.privateLookupIn + unreflectSetter writes the final
+            // field without deprecated APIs.
+            // Requires in consumer build.gradle.kts:
+            //   jvmArgs("--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+            //            "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED")
+
+            val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
+                ctx.javaClass,
+                java.lang.invoke.MethodHandles.lookup()
+            )
+            lookup.unreflectSetter(delegateField).invoke(ctx, replacement)
 
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {
