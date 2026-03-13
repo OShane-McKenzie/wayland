@@ -5,8 +5,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.PlatformContext
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
@@ -33,31 +38,49 @@ fun main() {
         val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
         scope.launch {
             try {
-                 demoBottomDock(scope)
-                // demoTopPanel(scope)
-                // demoOsd(scope)
-                // demoAppMenu(scope)
-                // demoDesktopBackground(scope)
-                // demoGenericWindow(scope)
+                demoBottomDock(scope)
             } finally {
                 done.complete(Unit)
             }
         }
     }
 
-    // Block the main thread until the surface is closed
     kotlinx.coroutines.runBlocking { done.await() }
 }
 
-//
-// ── Bottom dock ───────────────────────────────────────────────────────────────
-
+@OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
+val mySceneFactory = VirdinSceneFactory { coroutineContext ->
+    val scene    = ImageComposeScene(actualWidth, actualHeight, surfaceDensity, coroutineContext)
+    val ctx      = SceneContextAccessor.getContext(scene)
+    val existing = SceneContextAccessor.getPlatformContext(ctx)
+    val field    = SceneContextAccessor.getDelegateField(ctx)
+    field.set(ctx, object : PlatformContext by existing {
+        override suspend fun startInputMethod(
+            request: PlatformTextInputMethodRequest
+        ): Nothing {
+            val session = VirdinInputSession(
+                onEditCommand = request.onEditCommand,
+                onImeAction   = request.onImeAction ?: {}
+            )
+            notifyInputSession(session)
+            try {
+                suspendCancellableCoroutine<Nothing> { cont ->
+                    cont.invokeOnCancellation { notifyInputSession(null) }
+                }
+            } finally {
+                notifyInputSession(null)
+            }
+        }
+    })
+    scene
+}
 
 suspend fun demoBottomDock(scope: CoroutineScope) {
     val bridge = waylandDock(
-        position = ContentPosition.BOTTOM,
-        size     = 64,
-        scope    = scope
+        position     = ContentPosition.BOTTOM,
+        size         = 64,
+        sceneFactory = mySceneFactory,
+        scope        = scope
     ) {
         Box(
             modifier = Modifier
@@ -66,7 +89,10 @@ suspend fun demoBottomDock(scope: CoroutineScope) {
             contentAlignment = Alignment.Center
         ) {
             var text by remember { mutableStateOf("") }
-            Row(verticalAlignment = Alignment.CenterVertically){ Text("🚀  My Dock", color = Color.White); OutlinedTextField(value = text, {text = it}) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🚀  My Dock", color = Color.White)
+                OutlinedTextField(value = text, onValueChange = { text = it })
+            }
         }
     }
     bridge.awaitClose()

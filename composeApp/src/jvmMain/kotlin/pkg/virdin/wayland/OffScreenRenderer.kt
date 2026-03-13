@@ -19,7 +19,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal class VirdinInputSession(
+class VirdinInputSession(
     val onEditCommand: (List<EditCommand>) -> Unit,
     val onImeAction:   (ImeAction) -> Unit
 ) {
@@ -33,14 +33,20 @@ internal class OffScreenRenderer(
     @Volatile var width: Int,
     @Volatile var height: Int,
     private val density: Density,
-    private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null
+    private val bridge: WaylandBridge,
+    private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null,
+    // null  → default path: library does full reflection injection internally.
+    // non-null → factory path: consumer constructs + injects in their module;
+    //            library only wires setPointerIcon on top afterwards.
+    private val sceneFactory: VirdinSceneFactory? = null
 ) {
     private var scene: ImageComposeScene? = null
     private var currentContent: (@Composable () -> Unit)? = null
     private var pixelBuf: IntArray = IntArray(width * height)
     private var focusInitialized = false
 
-    @Volatile private var inputSession: VirdinInputSession? = null
+    // Written by the injected PlatformContext (either path), read by injectKeyEvent.
+    @Volatile internal var inputSession: VirdinInputSession? = null
 
     private val sceneExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "virdin-scene").apply { isDaemon = true }
@@ -99,7 +105,6 @@ internal class OffScreenRenderer(
         currentContent?.let { recreate(it) }
     }
 
-    // Tracks which buttons are currently held for drag/highlight support.
     private var currentButtons = PointerButtons()
 
     fun injectPointerEvent(event: PointerEvent) = postOnScene {
@@ -139,7 +144,6 @@ internal class OffScreenRenderer(
     fun injectKeyEvent(event: KeyEvent) = postOnScene {
         val sc = scene ?: return@postOnScene
 
-        // KeyUp — cancel repeat only.
         if (event.state == 0) {
             repeatJob?.cancel()
             repeatJob = null
@@ -305,8 +309,12 @@ internal class OffScreenRenderer(
         } catch (e: Exception) { "default" }
     }
 
+    // ── Default path (no factory) ─────────────────────────────────────────────
+    // Full injection: both setPointerIcon and startInputMethod are wired here
+    // inside the library. Works when there is no module boundary problem.
+
     @OptIn(InternalComposeUiApi::class)
-    private fun makePlatformContext(
+    private fun makeDefaultPlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
     ): androidx.compose.ui.platform.PlatformContext =
         object : androidx.compose.ui.platform.PlatformContext by base {
@@ -340,44 +348,79 @@ internal class OffScreenRenderer(
             }
         }
 
-
     @OptIn(InternalComposeUiApi::class)
     private fun injectPlatformContext(sc: ImageComposeScene) {
         try {
             val ctxField = sc.javaClass.getDeclaredField("_platformContext")
             ctxField.isAccessible = true
             val ctx = ctxField.get(sc)
-
             val delegateField = ctx.javaClass.getDeclaredField("\$\$delegate_0")
             delegateField.isAccessible = true
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
-            val replacement = makePlatformContext(existing)
-
-            // Plain field.set() works because Compose desktop JARs are plain JARs
-            // (no module-info.class) and live in the unnamed module, where final
-            // field writes via setAccessible(true) are permitted without any
-            // --add-opens flags, whether running as an app or as a library JAR.
-            delegateField.set(ctx, replacement)
-
-            println("[OffScreenRenderer] PlatformContext injected")
+            delegateField.set(ctx, makeDefaultPlatformContext(existing))
+            println("[OffScreenRenderer] PlatformContext injected (default)")
         } catch (e: Exception) {
             println("[OffScreenRenderer] PlatformContext injection failed: ${e.message}")
         }
     }
 
+    // ── Factory path ──────────────────────────────────────────────────────────
+    // The consumer already injected startInputMethod in their own module.
+    // The library wraps whatever delegate is in place to add setPointerIcon
+    // on top, leaving startInputMethod untouched.
+
+    @OptIn(InternalComposeUiApi::class)
+    private fun injectPointerIconOnly(sc: ImageComposeScene) {
+        try {
+            val ctxField = sc.javaClass.getDeclaredField("_platformContext")
+            ctxField.isAccessible = true
+            val ctx = ctxField.get(sc)
+            val delegateField = ctx.javaClass.getDeclaredField("\$\$delegate_0")
+            delegateField.isAccessible = true
+            val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
+            delegateField.set(ctx,
+                object : androidx.compose.ui.platform.PlatformContext by existing {
+                    override fun setPointerIcon(
+                        pointerIcon: androidx.compose.ui.input.pointer.PointerIcon
+                    ) {
+                        val cursorName = pointerIconToCursorName(pointerIcon)
+                        println("[OffScreenRenderer] pointer icon → $cursorName")
+                        onPointerIconChanged?.invoke(cursorName)
+                    }
+                }
+            )
+            println("[OffScreenRenderer] pointer icon context injected (factory path)")
+        } catch (e: Exception) {
+            println("[OffScreenRenderer] pointer icon injection failed: ${e.message}")
+        }
+    }
+
+    // ── Scene lifecycle ───────────────────────────────────────────────────────
+
     private fun recreate(content: @Composable () -> Unit) {
         scene?.close()
         inputSession = null
         repeatJob?.cancel()
-        val sc = ImageComposeScene(
-            width            = width,
-            height           = height,
-            density          = density,
-            coroutineContext = sceneDispatcher
-        ) {
-            androidx.compose.material3.MaterialTheme { content() }
+
+        val sc: ImageComposeScene = if (sceneFactory != null) {
+            // Factory path: consumer builds the scene in their module and
+            // injects startInputMethod. Library adds setPointerIcon on top.
+            val userScene = with(sceneFactory) { bridge.create(sceneDispatcher) }
+            injectPointerIconOnly(userScene)
+            userScene
+        } else {
+            // Default path: library builds and fully injects the scene.
+            val defaultScene = ImageComposeScene(
+                width            = width,
+                height           = height,
+                density          = density,
+                coroutineContext = sceneDispatcher
+            )
+            injectPlatformContext(defaultScene)
+            defaultScene
         }
-        injectPlatformContext(sc)
+
+        sc.setContent { androidx.compose.material3.MaterialTheme { content() } }
         scene = sc
         focusInitialized = false
     }
