@@ -1,102 +1,89 @@
 package pkg.virdin.wayland
+
+//import androidx.compose.foundation.background
+//import androidx.compose.foundation.layout.*
+//import androidx.compose.material3.*
+//import androidx.compose.runtime.*
+//import androidx.compose.ui.Alignment
+//import androidx.compose.ui.ExperimentalComposeUiApi
+//import androidx.compose.ui.ImageComposeScene
+//import androidx.compose.ui.InternalComposeUiApi
+//import androidx.compose.ui.Modifier
+//import androidx.compose.ui.graphics.Color
+//import androidx.compose.ui.platform.PlatformContext
+//import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+//import kotlinx.coroutines.*
+//import kotlinx.coroutines.swing.Swing
+//import javax.swing.SwingUtilities
+
+
+//@OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
+//val mySceneFactory = VirdinSceneFactory { coroutineContext ->
+//    val scene    = ImageComposeScene(actualWidth, actualHeight, surfaceDensity, coroutineContext)
+//    val ctx      = SceneContextAccessor.getContext(scene)
+//    val existing = SceneContextAccessor.getPlatformContext(ctx)
 //
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.ImageComposeScene
-import androidx.compose.ui.InternalComposeUiApi
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.PlatformContext
-import androidx.compose.ui.platform.PlatformTextInputMethodRequest
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.*
-import kotlinx.coroutines.swing.Swing
-import pkg.virdin.wayland.*
-import javax.swing.SwingUtilities
+//    SceneContextAccessor.putDelegate(ctx, object : PlatformContext by existing {
+//        override suspend fun startInputMethod(
+//            request: PlatformTextInputMethodRequest
+//        ): Nothing {
+//            val session = VirdinInputSession(
+//                onEditCommand = request.onEditCommand,
+//                onImeAction   = request.onImeAction ?: {}
+//            )
+//            notifyInputSession(session)
+//            try {
+//                suspendCancellableCoroutine<Nothing> { cont ->
+//                    cont.invokeOnCancellation { notifyInputSession(null) }
+//                }
+//            } finally {
+//                notifyInputSession(null)
+//            }
+//        }
+//    })
+//    scene
+//}
 //
-//// ── Entry point ───────────────────────────────────────────────────────────────
-////
-//// Must launch from the Swing EDT so that Dispatchers.Swing has a running
-//// event pump to dispatch to.  runBlocking on the main thread blocks the
-//// thread but does NOT start an AWT event loop — Dispatchers.Swing tasks
-//// posted from that context queue up and never execute, producing blank frames.
-////
-//// Pattern:
-////   SwingUtilities.invokeLater  →  starts AWT pump on EDT
-////   CoroutineScope(Dispatchers.Swing)  →  coroutines run on that same EDT
-////   done.await()  →  main thread sleeps until bridge.close() is called
+//suspend fun demoBottomDock(scope: CoroutineScope) {
+//    val bridge = waylandDock(
+//        position     = ContentPosition.BOTTOM,
+//        size         = 64,
+//        sceneFactory = mySceneFactory,
+//        scope        = scope
+//    ) {
+//        Box(
+//            modifier = Modifier
+//                .fillMaxSize()
+//                .background(Color(0xCC1E1E2E)),
+//            contentAlignment = Alignment.Center
+//        ) {
+//            var text by remember { mutableStateOf("") }
+//            Row(verticalAlignment = Alignment.CenterVertically) {
+//                Text("🚀  My Dock", color = Color.White)
+//                OutlinedTextField(value = text, onValueChange = { text = it })
+//            }
+//        }
+//    }
+//    bridge.awaitClose()
+//}
 //
-fun main() {
-    val done = CompletableDeferred<Unit>()
+//fun main() {
+//    val done = CompletableDeferred<Unit>()
+//
+//    SwingUtilities.invokeLater {
+//        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
+//        scope.launch {
+//            try {
+//                demoBottomDock(scope)
+//            } finally {
+//                done.complete(Unit)
+//            }
+//        }
+//    }
+//
+//    kotlinx.coroutines.runBlocking { done.await() }
+//}
 
-    SwingUtilities.invokeLater {
-        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
-        scope.launch {
-            try {
-                demoBottomDock(scope)
-            } finally {
-                done.complete(Unit)
-            }
-        }
-    }
-
-    kotlinx.coroutines.runBlocking { done.await() }
-}
-
-@OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
-val mySceneFactory = VirdinSceneFactory { coroutineContext ->
-    val scene    = ImageComposeScene(actualWidth, actualHeight, surfaceDensity, coroutineContext)
-    val ctx      = SceneContextAccessor.getContext(scene)
-    val existing = SceneContextAccessor.getPlatformContext(ctx)
-    val field    = SceneContextAccessor.getDelegateField(ctx)
-    field.set(ctx, object : PlatformContext by existing {
-        override suspend fun startInputMethod(
-            request: PlatformTextInputMethodRequest
-        ): Nothing {
-            val session = VirdinInputSession(
-                onEditCommand = request.onEditCommand,
-                onImeAction   = request.onImeAction ?: {}
-            )
-            notifyInputSession(session)
-            try {
-                suspendCancellableCoroutine<Nothing> { cont ->
-                    cont.invokeOnCancellation { notifyInputSession(null) }
-                }
-            } finally {
-                notifyInputSession(null)
-            }
-        }
-    })
-    scene
-}
-
-suspend fun demoBottomDock(scope: CoroutineScope) {
-    val bridge = waylandDock(
-        position     = ContentPosition.BOTTOM,
-        size         = 64,
-        sceneFactory = mySceneFactory,
-        scope        = scope
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xCC1E1E2E)),
-            contentAlignment = Alignment.Center
-        ) {
-            var text by remember { mutableStateOf("") }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🚀  My Dock", color = Color.White)
-                OutlinedTextField(value = text, onValueChange = { text = it })
-            }
-        }
-    }
-    bridge.awaitClose()
-}
 
 
 //// ── Top panel ─────────────────────────────────────────────────────────────────

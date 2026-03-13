@@ -13,7 +13,6 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import org.jetbrains.skia.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -35,9 +34,6 @@ internal class OffScreenRenderer(
     private val density: Density,
     private val bridge: WaylandBridge,
     private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null,
-    // null  → default path: library does full reflection injection internally.
-    // non-null → factory path: consumer constructs + injects in their module;
-    //            library only wires setPointerIcon on top afterwards.
     private val sceneFactory: VirdinSceneFactory? = null
 ) {
     private var scene: ImageComposeScene? = null
@@ -45,7 +41,6 @@ internal class OffScreenRenderer(
     private var pixelBuf: IntArray = IntArray(width * height)
     private var focusInitialized = false
 
-    // Written by the injected PlatformContext (either path), read by injectKeyEvent.
     @Volatile internal var inputSession: VirdinInputSession? = null
 
     private val sceneExecutor = Executors.newSingleThreadExecutor { r ->
@@ -53,7 +48,6 @@ internal class OffScreenRenderer(
     }
     private val sceneDispatcher = sceneExecutor.asCoroutineDispatcher()
 
-    // Key repeat
     private var repeatJob: Job? = null
     private val repeatScope = CoroutineScope(sceneDispatcher)
 
@@ -309,12 +303,12 @@ internal class OffScreenRenderer(
         } catch (e: Exception) { "default" }
     }
 
-    // ── Default path (no factory) ─────────────────────────────────────────────
-    // Full injection: both setPointerIcon and startInputMethod are wired here
-    // inside the library. Works when there is no module boundary problem.
+    // ── Pointer icon injection ────────────────────────────────────────────────
+    // Only overrides setPointerIcon — does not touch startInputMethod.
+    // Reading a field value (not writing final) so Java 17 rules do not apply.
 
     @OptIn(InternalComposeUiApi::class)
-    private fun makeDefaultPlatformContext(
+    private fun makePlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
     ): androidx.compose.ui.platform.PlatformContext =
         object : androidx.compose.ui.platform.PlatformContext by base {
@@ -322,29 +316,6 @@ internal class OffScreenRenderer(
                 val cursorName = pointerIconToCursorName(pointerIcon)
                 println("[OffScreenRenderer] pointer icon → $cursorName")
                 onPointerIconChanged?.invoke(cursorName)
-            }
-
-            override suspend fun startInputMethod(
-                request: androidx.compose.ui.platform.PlatformTextInputMethodRequest
-            ): Nothing {
-                val session = VirdinInputSession(
-                    onEditCommand = request.onEditCommand,
-                    onImeAction   = request.onImeAction ?: {}
-                )
-                inputSession = session
-                println("[OffScreenRenderer] startInputMethod — input session open")
-                try {
-                    suspendCancellableCoroutine<Nothing> { cont ->
-                        cont.invokeOnCancellation {
-                            if (inputSession === session) {
-                                inputSession = null
-                                println("[OffScreenRenderer] input session closed")
-                            }
-                        }
-                    }
-                } finally {
-                    if (inputSession === session) inputSession = null
-                }
             }
         }
 
@@ -357,45 +328,14 @@ internal class OffScreenRenderer(
             val delegateField = ctx.javaClass.getDeclaredField("\$\$delegate_0")
             delegateField.isAccessible = true
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
-            delegateField.set(ctx, makeDefaultPlatformContext(existing))
-            println("[OffScreenRenderer] PlatformContext injected (default)")
+            delegateField.set(ctx, makePlatformContext(existing))
+            println("[OffScreenRenderer] PlatformContext injected (pointer icon only)")
         } catch (e: Exception) {
             println("[OffScreenRenderer] PlatformContext injection failed: ${e.message}")
         }
     }
 
-    // ── Factory path ──────────────────────────────────────────────────────────
-    // The consumer already injected startInputMethod in their own module.
-    // The library wraps whatever delegate is in place to add setPointerIcon
-    // on top, leaving startInputMethod untouched.
-
-    @OptIn(InternalComposeUiApi::class)
-    private fun injectPointerIconOnly(sc: ImageComposeScene) {
-        try {
-            val ctxField = sc.javaClass.getDeclaredField("_platformContext")
-            ctxField.isAccessible = true
-            val ctx = ctxField.get(sc)
-            val delegateField = ctx.javaClass.getDeclaredField("\$\$delegate_0")
-            delegateField.isAccessible = true
-            val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
-            delegateField.set(ctx,
-                object : androidx.compose.ui.platform.PlatformContext by existing {
-                    override fun setPointerIcon(
-                        pointerIcon: androidx.compose.ui.input.pointer.PointerIcon
-                    ) {
-                        val cursorName = pointerIconToCursorName(pointerIcon)
-                        println("[OffScreenRenderer] pointer icon → $cursorName")
-                        onPointerIconChanged?.invoke(cursorName)
-                    }
-                }
-            )
-            println("[OffScreenRenderer] pointer icon context injected (factory path)")
-        } catch (e: Exception) {
-            println("[OffScreenRenderer] pointer icon injection failed: ${e.message}")
-        }
-    }
-
-    // ── Scene lifecycle ───────────────────────────────────────────────────────
+    // ── Scene recreation ──────────────────────────────────────────────────────
 
     private fun recreate(content: @Composable () -> Unit) {
         scene?.close()
@@ -403,13 +343,14 @@ internal class OffScreenRenderer(
         repeatJob?.cancel()
 
         val sc: ImageComposeScene = if (sceneFactory != null) {
-            // Factory path: consumer builds the scene in their module and
-            // injects startInputMethod. Library adds setPointerIcon on top.
+            // Factory path: consumer constructs scene and injects startInputMethod
+            // in their own module where the VarHandle write is permitted.
+            // Library then wraps the result to add setPointerIcon on top.
             val userScene = with(sceneFactory) { bridge.create(sceneDispatcher) }
-            injectPointerIconOnly(userScene)
+            injectPlatformContext(userScene)
             userScene
         } else {
-            // Default path: library builds and fully injects the scene.
+            // Default path: no IME support. Pointer icon still works.
             val defaultScene = ImageComposeScene(
                 width            = width,
                 height           = height,

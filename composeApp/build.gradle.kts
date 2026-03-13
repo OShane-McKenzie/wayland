@@ -64,7 +64,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.0.9"
+            version = "2.1.1"
             from(components["kotlin"])
         }
     }

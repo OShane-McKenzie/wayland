@@ -23,7 +23,7 @@ object SceneContextAccessor {
 
     /**
      * Returns the [DELEGATE_FIELD] reflective handle for [ctx], already marked
-     * accessible. Pass the result directly to [Field.set] — no further
+     * accessible. Pass the result directly to [putDelegate] — no further
      * [Field.isAccessible] call needed.
      */
     @OptIn(InternalComposeUiApi::class)
@@ -32,10 +32,35 @@ object SceneContextAccessor {
     }
 
     /**
+     * Writes [replacement] into the [DELEGATE_FIELD] of [ctx] using
+     * [sun.misc.Unsafe] via reflection, avoiding any direct reference to the
+     * deprecated ["sun.misc.Unsafe.putObject"] API.
+     *
+     * Requires --add-opens=java.base/sun.misc=ALL-UNNAMED in JVM args.
+     */
+    @OptIn(InternalComposeUiApi::class)
+    fun putDelegate(ctx: Any, replacement: PlatformContext) {
+        val unsafeField = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe")
+        unsafeField.isAccessible = true
+        val unsafe = unsafeField.get(null)
+
+        val field  = getDelegateField(ctx)
+        val offsetMethod = unsafe.javaClass.getMethod("objectFieldOffset", Field::class.java)
+        val offset = offsetMethod.invoke(unsafe, field) as Long
+
+        val putMethod = unsafe.javaClass.getMethod(
+            "putObject",
+            Any::class.java,
+            Long::class.java,
+            Any::class.java
+        )
+        putMethod.invoke(unsafe, ctx, offset, replacement)
+    }
+
+    /**
      * Name of the generated delegate field inside ImageComposeScene's
-     * _platformContext anonymous class. Exposed so consumer code performing
-     * the field.set() can reference the same constant rather than
-     * duplicating the string literal.
+     * _platformContext anonymous class. Exposed so consumer code can
+     * reference the same constant rather than duplicating the string literal.
      */
     const val DELEGATE_FIELD = "\$\$delegate_0"
 }

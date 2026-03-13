@@ -21,9 +21,7 @@ class WaylandBridge(
     var actualWidth:  Int = 0; private set
     var actualHeight: Int = 0; private set
 
-    // Density derived from wl_output scale — read-only to callers.
-    // Exposed so a VirdinSceneFactory implementation can pass it to
-    // ImageComposeScene without the library having to expose the raw scale value.
+    // Density derived from wl_output scale — exposed for VirdinSceneFactory implementations.
     var surfaceDensity: Density = Density(1f); private set
 
     private var socket:   BridgeSocket?      = null
@@ -38,11 +36,9 @@ class WaylandBridge(
     private val renderTrigger = ArrayBlockingQueue<Unit>(1)
 
     /**
-     * Called by a [VirdinSceneFactory] implementation from inside its injected
-     * `PlatformContext.startInputMethod` override to hand the active input
-     * session back to the library.
-     *
-     * Pass `null` to close the session (on cancellation or completion).
+     * Called from inside a [VirdinSceneFactory] implementation's injected
+     * PlatformContext.startInputMethod to hand the active input session to
+     * the library. Pass null to close the session.
      */
     fun notifyInputSession(session: VirdinInputSession?) {
         renderer?.inputSession = session
@@ -82,13 +78,13 @@ class WaylandBridge(
             val ack = withTimeoutOrNull(15_000L) { bridgeSock.waitForAck() }
                 ?: error("No CONFIGURE_ACK received within 15 seconds")
 
-            val scale    = ack.scale
-            val density  = Density(scale)
-            val physW    = (ack.width  * scale).toInt()
-            val physH    = (ack.height * scale).toInt()
-            actualWidth  = physW
-            actualHeight = physH
-            surfaceDensity = density
+            val scale        = ack.scale
+            val density      = Density(scale)
+            val physW        = (ack.width  * scale).toInt()
+            val physH        = (ack.height * scale).toInt()
+            actualWidth      = physW
+            actualHeight     = physH
+            surfaceDensity   = density
             println("[JVM] surface: ${ack.width}x${ack.height} logical, ${physW}x${physH} physical, scale=$scale")
 
             if (physW != overW || physH != overH) {
