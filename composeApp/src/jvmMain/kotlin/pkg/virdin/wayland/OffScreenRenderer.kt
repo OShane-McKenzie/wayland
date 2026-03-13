@@ -352,14 +352,18 @@ internal class OffScreenRenderer(
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
             val replacement = makePlatformContext(existing)
 
-            // Use MethodHandles to write the final field.
-            // Requires --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
-            //           --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
-            val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
-                ctx.javaClass,
-                java.lang.invoke.MethodHandles.lookup()
-            )
-            lookup.unreflectSetter(delegateField).invoke(ctx, replacement)
+            // Unsafe.putObject bypasses declared-type checks on the field,
+            // which is necessary because the field is typed as the concrete
+            // PlatformContext$Empty class, not the PlatformContext interface.
+            @Suppress("DEPRECATION")
+            val unsafeField = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe")
+            unsafeField.isAccessible = true
+            @Suppress("DEPRECATION")
+            val unsafe = unsafeField.get(null) as sun.misc.Unsafe
+            @Suppress("DEPRECATION")
+            val offset = unsafe.objectFieldOffset(delegateField)
+            @Suppress("DEPRECATION")
+            unsafe.putObject(ctx, offset, replacement)
 
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {

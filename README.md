@@ -67,26 +67,9 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie:wayland:2.0.6-ALPHA")
+    implementation("com.github.OShane-McKenzie:wayland:2.0.7-ALPHA")
 }
 ```
-
-### Required JVM flags
-
-The library uses reflection to wire up pointer icon and text input callbacks inside `ImageComposeScene`. Add these flags to your app's `build.gradle.kts`:
-
-```kotlin
-compose.desktop {
-    application {
-        jvmArgs(
-            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-            "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
-        )
-    }
-}
-```
-
-Without these flags, cursor shape changes and keyboard input sessions will not function.
 
 ---
 
