@@ -23,7 +23,9 @@ See the full license text at [https://www.gnu.org/licenses/gpl-3.0](https://www.
 - Vsync-paced rendering driven by compositor frame callbacks
 - Full keyboard support via xkbcommon with layout-aware keysyms and modifier state
 - Flexible configuration: anchor, layer, exclusive zone, keyboard mode, margins
-- HiDPI support via `GDK_SCALE` / `QT_SCALE_FACTOR` environment variables
+- HiDPI / Retina support with automatic scale detection and crisp physical-pixel rendering
+- Live cursor shape changes (text, pointer, resize, etc.) driven by `Modifier.pointerHoverIcon`
+- Text input via `TextField` and `OutlinedTextField` with full IME session support
 
 ---
 
@@ -34,8 +36,6 @@ See the full license text at [https://www.gnu.org/licenses/gpl-3.0](https://www.
 - Java 17 or higher
 - Gradle 8.0 or higher
 
-> **Note:** GNOME Shell does not support `zwlr_layer_shell_v1` by default. KDE Plasma requires KWin 5.27 or later.
-
 ---
 
 ## How It Works
@@ -45,7 +45,7 @@ A small C binary (`wayland-helper`) is bundled inside the JAR and extracted at r
 ```
 JVM (Compose/Skia) --socket--> wayland-helper --Wayland--> Compositor
         ^                                                        |
-        +-------------- shared memory (pixels) <-----------------+
+        +-------------- shared memory (pixels) <----------------+
 ```
 
 ---
@@ -67,11 +67,26 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.OShane-McKenzie:wayland:2.0.5-ALPHA")
+    implementation("com.github.OShane-McKenzie:wayland:2.0.6-ALPHA")
 }
 ```
 
-Replace `TAG` with the latest release version shown in the badge above.
+### Required JVM flags
+
+The library uses reflection to wire up pointer icon and text input callbacks inside `ImageComposeScene`. Add these flags to your app's `build.gradle.kts`:
+
+```kotlin
+compose.desktop {
+    application {
+        jvmArgs(
+            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+            "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
+        )
+    }
+}
+```
+
+Without these flags, cursor shape changes and keyboard input sessions will not function.
 
 ---
 
@@ -86,7 +101,7 @@ fun main() {
         val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
         scope.launch {
             try {
-                myDock(scope)
+                demoBottomDock(scope)
             } finally {
                 done.complete(Unit)
             }
@@ -95,19 +110,22 @@ fun main() {
     runBlocking { done.await() }
 }
 
-suspend fun myDock(scope: CoroutineScope) {
+suspend fun demoBottomDock(scope: CoroutineScope) {
     val bridge = waylandDock(
         position = ContentPosition.BOTTOM,
         size     = 64,
         scope    = scope
     ) {
         Box(
-            modifier = Modifier.fillMaxSize().background(Color(0xCC1E1E2E)),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xCC1E1E2E)),
             contentAlignment = Alignment.Center
         ) {
-            var label by remember { mutableStateOf("My Dock") }
-            Button({ label = "Clicked!" }) {
-                Text("$label", color = Color.White)
+            var text by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🚀  My Dock", color = Color.White)
+                OutlinedTextField(value = text, onValueChange = { text = it })
             }
         }
     }
@@ -466,11 +484,21 @@ BinarySource.Path("/your/path/wayland-helper")  // use an installed binary
 
 ## HiDPI
 
-`screenDensity()` reads `GDK_SCALE` or `QT_SCALE_FACTOR` environment variables set by most Wayland desktops, then falls back to AWT DPI detection. Override per surface:
+The library automatically reads the `wl_output` scale factor from the Wayland compositor and renders at the correct physical pixel resolution. `screenDensity()` additionally reads `GDK_SCALE` or `QT_SCALE_FACTOR` environment variables set by most Wayland desktops, then falls back to AWT DPI detection. Override per surface:
 
 ```kotlin
 waylandDock(density = Density(2f)) { /*...*/ }
 ```
+
+Pointer coordinates are automatically translated between logical and physical pixel spaces so hit testing and hover effects work correctly at any scale.
+
+---
+
+## Cursor Shape Support
+
+`Modifier.pointerHoverIcon` works out of the box. When Compose requests a cursor change the library sends the new shape name to the compositor over the socket protocol and the native cursor updates on the next pointer motion event. Standard X cursor names are supported: `default`, `text`, `pointer`, `crosshair`, `move`, `wait`, `ns-resize`, `ew-resize`, `nesw-resize`, `nwse-resize`.
+
+Requires the two JVM flags listed in the Installation section.
 
 ---
 
@@ -485,19 +513,19 @@ waylandDock(density = Density(2f)) { /*...*/ }
 
 ## Known Issues
 
-### Gradient caveat — desktop Skia vs Android Skia
+### Gradient caveat -- desktop Skia vs Android Skia
 
-`Brush.linearGradient` with `end = Offset(Float.MAX_VALUE, Float.MAX_VALUE)` is a common Android pattern for a diagonal gradient that fills any bounds. Android's Skia fork handles infinite coordinates silently. Desktop Skia does not — it returns a null shader pointer and throws `RuntimeException: Can't wrap nullptr` at draw time, crashing the entire render frame.
+`Brush.linearGradient` with `end = Offset(Float.MAX_VALUE, Float.MAX_VALUE)` is a common Android pattern for a diagonal gradient that fills any bounds. Android's Skia fork handles infinite coordinates silently. Desktop Skia does not -- it returns a null shader pointer and throws `RuntimeException: Can't wrap nullptr` at draw time, crashing the entire render frame.
 
 ```kotlin
-// ❌ crashes on desktop Skia
+// crashes on desktop Skia
 Brush.linearGradient(
     colors,
     start = Offset.Zero,
     end   = Offset(Float.MAX_VALUE, Float.MAX_VALUE)
 )
 
-// ✅ works everywhere — Compose defaults to top-left → bottom-right
+// works everywhere -- Compose defaults to top-left to bottom-right
 Brush.linearGradient(colors)
 ```
 
@@ -511,12 +539,17 @@ Check that your compositor supports `zwlr_layer_shell_v1`. Confirmed working: Sw
 
 **Blurry rendering on HiDPI**
 
-Set `GDK_SCALE=2` (or your scale factor) in your launch script, or pass `density = Density(2f)` explicitly.
+Set `GDK_SCALE=2` (or your scale factor) in your launch script, or pass `density = Density(2f)` explicitly. The library reads the compositor scale automatically, but setting the env var ensures `screenDensity()` agrees with the compositor value.
+
+**Cursor not changing shape / text input not working**
+
+Make sure the two required JVM flags are present in your `build.gradle.kts` (see Installation). Without them the platform context injection fails silently, `Modifier.pointerHoverIcon` has no effect, and `TextField` / `OutlinedTextField` will not accept keyboard input.
 
 **App crashes on rapid clicks**
 
 Wrap your content in `MaterialTheme { }` to give the Compose ripple system a proper context. This is a known CMP issue with `ImageComposeScene`.
 
+**Missing libxkbcommon**
 
 Install the development package:
 
