@@ -112,7 +112,6 @@ internal class OffScreenRenderer(
             else                  PointerEventType.Release
             else                -> PointerEventType.Unknown
         }
-
         if (event.type == PtrEventType.BUTTON) {
             val pressed = event.state == 1
             currentButtons = when (event.button) {
@@ -128,14 +127,12 @@ internal class OffScreenRenderer(
                 else -> currentButtons
             }
         }
-
         sc.sendPointerEvent(
             type, Offset(event.x, event.y),
             timeMillis = System.currentTimeMillis(),
             type       = PointerType.Mouse,
             buttons    = currentButtons
         )
-
     }
 
     @OptIn(InternalComposeUiApi::class)
@@ -261,7 +258,6 @@ internal class OffScreenRenderer(
             alphaType  = ColorAlphaType.PREMUL,
             colorSpace = null
         )
-
         val bitmap = Bitmap()
         bitmap.allocPixels(info)
         val ok = image.readPixels(null, bitmap, 0, 0, false)
@@ -344,6 +340,7 @@ internal class OffScreenRenderer(
             }
         }
 
+
     @OptIn(InternalComposeUiApi::class)
     private fun injectPlatformContext(sc: ImageComposeScene) {
         try {
@@ -356,17 +353,11 @@ internal class OffScreenRenderer(
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
             val replacement = makePlatformContext(existing)
 
-            // MethodHandles.privateLookupIn + unreflectSetter writes the final
-            // field without deprecated APIs.
-            // Requires in consumer build.gradle.kts:
-            //   jvmArgs("--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-            //            "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED")
-
-            val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
-                ctx.javaClass,
-                java.lang.invoke.MethodHandles.lookup()
-            )
-            lookup.unreflectSetter(delegateField).invoke(ctx, replacement)
+            // Plain field.set() works because Compose desktop JARs are plain JARs
+            // (no module-info.class) and live in the unnamed module, where final
+            // field writes via setAccessible(true) are permitted without any
+            // --add-opens flags, whether running as an app or as a library JAR.
+            delegateField.set(ctx, replacement)
 
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {

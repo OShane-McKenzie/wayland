@@ -52,6 +52,7 @@ fun main() {
 //
 // ── Bottom dock ───────────────────────────────────────────────────────────────
 
+
 suspend fun demoBottomDock(scope: CoroutineScope) {
     val bridge = waylandDock(
         position = ContentPosition.BOTTOM,
