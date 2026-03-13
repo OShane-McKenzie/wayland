@@ -352,19 +352,14 @@ internal class OffScreenRenderer(
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
             val replacement = makePlatformContext(existing)
 
-            // Use MethodHandles unrestricted lookup to write final fields —
-            // works both as app and as library JAR on modern JVMs.
-            try {
-                val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
-                    ctx.javaClass,
-                    java.lang.invoke.MethodHandles.lookup()
-                )
-                val handle = lookup.unreflectSetter(delegateField)
-                handle.invoke(ctx, replacement)
-            } catch (mhEx: Exception) {
-                // Fallback: direct set (works if JVM allows it)
-                delegateField.set(ctx, replacement)
-            }
+            // Use MethodHandles to write the final field.
+            // Requires --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+            //           --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+            val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
+                ctx.javaClass,
+                java.lang.invoke.MethodHandles.lookup()
+            )
+            lookup.unreflectSetter(delegateField).invoke(ctx, replacement)
 
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {
