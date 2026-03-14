@@ -34,7 +34,8 @@ internal class OffScreenRenderer(
     private val density: Density,
     private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null,
     // Called after setContent() on every new ImageComposeScene instance,
-    // including after resize. Use this to inject PlatformContext.
+    // including after resize. Use this to inject PlatformContext via
+    // SceneContextAccessor.putDelegate — scene is fully initialized at this point.
     private val onSceneReady: ((ImageComposeScene) -> Unit)? = null
 ) {
     private var scene: ImageComposeScene? = null
@@ -351,12 +352,12 @@ internal class OffScreenRenderer(
         // Set content first — fully initializes _platformContext internals.
         sc.setContent { androidx.compose.material3.MaterialTheme { content() } }
 
-        // Inject pointer icon — reads existing delegate, safe after setContent.
-        injectPlatformContext(sc)
-
-        // Notify consumer after scene is fully initialized and content is set.
-        // Safe to call putDelegate here — _platformContext is fully set up.
+        // Consumer injects startInputMethod first, into the fully initialized scene.
         onSceneReady?.invoke(sc)
+
+        // Library wraps whatever is now in the delegate to add setPointerIcon,
+        // preserving the consumer's startInputMethod implementation underneath.
+        injectPlatformContext(sc)
 
         scene = sc
         focusInitialized = false

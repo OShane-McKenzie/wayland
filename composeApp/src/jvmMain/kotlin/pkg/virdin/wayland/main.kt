@@ -1,85 +1,84 @@
 package pkg.virdin.wayland
 
-//import androidx.compose.foundation.background
-//import androidx.compose.foundation.layout.*
-//import androidx.compose.material3.*
-//import androidx.compose.runtime.*
-//import androidx.compose.ui.Alignment
-//import androidx.compose.ui.ExperimentalComposeUiApi
-//import androidx.compose.ui.ImageComposeScene
-//import androidx.compose.ui.InternalComposeUiApi
-//import androidx.compose.ui.Modifier
-//import androidx.compose.ui.graphics.Color
-//import androidx.compose.ui.platform.PlatformContext
-//import androidx.compose.ui.platform.PlatformTextInputMethodRequest
-//import kotlinx.coroutines.*
-//import kotlinx.coroutines.swing.Swing
-//import javax.swing.SwingUtilities
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.PlatformContext
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
+import kotlinx.coroutines.*
+import kotlinx.coroutines.swing.Swing
+import javax.swing.SwingUtilities
 //
 //
 //
-//lateinit var bridge: WaylandBridge
-//@OptIn(InternalComposeUiApi::class, ExperimentalComposeUiApi::class)
-//val onSceneReady: (ImageComposeScene) -> Unit = { scene ->
-//    val ctx      = SceneContextAccessor.getContext(scene)
-//    val existing = SceneContextAccessor.getPlatformContext(ctx)
-//    SceneContextAccessor.putDelegate(ctx, object : PlatformContext by existing {
-//        override suspend fun startInputMethod(
-//            request: PlatformTextInputMethodRequest
-//        ): Nothing {
-//            val session = VirdinInputSession(
-//                onEditCommand = request.onEditCommand,
-//                onImeAction   = request.onImeAction ?: {}
-//            )
-//            bridge.notifyInputSession(session)
-//            try {
-//                suspendCancellableCoroutine<Nothing> { cont ->
-//                    cont.invokeOnCancellation { bridge.notifyInputSession(null) }
-//                }
-//            } finally {
-//                bridge.notifyInputSession(null)
-//            }
-//        }
-//    })
-//}
+lateinit var bridge: WaylandBridge
+@OptIn(InternalComposeUiApi::class, ExperimentalComposeUiApi::class)
+val onSceneReady: (ImageComposeScene) -> Unit = { scene ->
+    val ctx      = SceneContextAccessor.getContext(scene)
+    val existing = SceneContextAccessor.getPlatformContext(ctx)
+    SceneContextAccessor.putDelegate(ctx, object : PlatformContext by existing {
+        override suspend fun startInputMethod(
+            request: PlatformTextInputMethodRequest
+        ): Nothing {
+            val session = VirdinInputSession(
+                onEditCommand = request.onEditCommand,
+                onImeAction   = request.onImeAction ?: {}
+            )
+            bridge.notifyInputSession(session)
+            try {
+                suspendCancellableCoroutine<Nothing> { cont ->
+                    cont.invokeOnCancellation { bridge.notifyInputSession(null) }
+                }
+            } finally {
+                bridge.notifyInputSession(null)
+            }
+        }
+    })
+}
 //
-//suspend fun demoBottomDock(scope: CoroutineScope) {
-//    bridge = waylandDock(
-//        position     = ContentPosition.BOTTOM,
-//        size         = 64,
-//        onSceneReady = onSceneReady,
-//        scope        = scope
-//    ) {
-//        Box(
-//            modifier = Modifier.fillMaxSize().background(Color(0xCC1E1E2E)),
-//            contentAlignment = Alignment.Center
-//        ) {
-//            var text by remember { mutableStateOf("") }
-//            Row(verticalAlignment = Alignment.CenterVertically) {
-//                Text("🚀  My Dock", color = Color.White)
-//                OutlinedTextField(value = text, onValueChange = { text = it })
-//            }
-//        }
-//    }
-//    bridge.awaitClose()
-//}
-////
-//fun main() {
-//    val done = CompletableDeferred<Unit>()
+suspend fun demoBottomDock(scope: CoroutineScope) {
+    bridge = waylandDock(
+        position     = ContentPosition.BOTTOM,
+        size         = 64,
+        onSceneReady = onSceneReady,
+        scope        = scope
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color(0xCC1E1E2E)),
+            contentAlignment = Alignment.Center
+        ) {
+            var text by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🚀  My Dock", color = Color.White)
+                OutlinedTextField(value = text, onValueChange = { text = it })
+            }
+        }
+    }
+    bridge.awaitClose()
+}
 //
-//    SwingUtilities.invokeLater {
-//        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
-//        scope.launch {
-//            try {
-//                demoBottomDock(scope)
-//            } finally {
-//                done.complete(Unit)
-//            }
-//        }
-//    }
-//
-//    kotlinx.coroutines.runBlocking { done.await() }
-//}
+fun main() {
+    val done = CompletableDeferred<Unit>()
+
+    SwingUtilities.invokeLater {
+        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
+        scope.launch {
+            try {
+                demoBottomDock(scope)
+            } finally {
+                done.complete(Unit)
+            }
+        }
+    }
+    kotlinx.coroutines.runBlocking { done.await() }
+}
 
 
 
