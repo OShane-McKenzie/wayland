@@ -378,9 +378,23 @@ internal class OffScreenRenderer(
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
             val replacement = makePlatformContext(existing)
 
-            // Agent opens java.base/java.lang.reflect at JVM startup so this
-            // Field.set on a final field works without any Unsafe workaround.
-            delegateField.set(ctx, replacement)
+            // jdk.internal.misc.Unsafe is opened by the agent.
+            // Using reflection to invoke it avoids any direct deprecated reference.
+            val internalUnsafeClass  = Class.forName("jdk.internal.misc.Unsafe")
+            val internalUnsafeField  = internalUnsafeClass.getDeclaredField("theUnsafe")
+            internalUnsafeField.isAccessible = true
+            val internalUnsafe       = internalUnsafeField.get(null)
+
+            val offsetMethod = internalUnsafe.javaClass.getMethod(
+                "objectFieldOffset", java.lang.reflect.Field::class.java
+            )
+            val offset = offsetMethod.invoke(internalUnsafe, delegateField) as Long
+
+            val putMethod = internalUnsafe.javaClass.getMethod(
+                "putReference",
+                Any::class.java, Long::class.java, Any::class.java
+            )
+            putMethod.invoke(internalUnsafe, ctx, offset, replacement)
 
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {
