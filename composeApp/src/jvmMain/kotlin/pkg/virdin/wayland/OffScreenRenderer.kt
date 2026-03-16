@@ -311,34 +311,23 @@ internal class OffScreenRenderer(
     private fun makePlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
     ): androidx.compose.ui.platform.PlatformContext {
-        // Capture everything we need as local vals so the anonymous object
-        // holds no reference to the outer OffScreenRenderer instance via
-        // Kotlin's "by base" delegation (which adds its own $$delegate_0 field
-        // and can NPE when accessed from a library JAR context).
-        val capturedWindowInfo    = base.windowInfo
-        val capturedIconChanged   = onPointerIconChanged
-        val capturedIconConverter = ::pointerIconToCursorName
-        val sessionRef            = object {
-            @Volatile var value: VirdinInputSession? = null
-        }
-        // Mirror sessionRef into the outer field on set
-        val setSession: (VirdinInputSession?) -> Unit = { s ->
-            sessionRef.value = s
-            inputSession = s
-        }
+        val capturedWindowInfo  = base.windowInfo
+        val capturedInputMode   = base.inputModeManager
+        val capturedScreenReader = base.screenReader
+        val capturedIconChanged = onPointerIconChanged
+        val capturedConverter   = ::pointerIconToCursorName
 
         return object : androidx.compose.ui.platform.PlatformContext {
-            override val windowInfo get() = capturedWindowInfo
-            override val screenReader: PlatformScreenReader
-                get() = base.screenReader
+            override val windowInfo       get() = capturedWindowInfo
+            override val inputModeManager get() = capturedInputMode
+            override val screenReader     get() = capturedScreenReader
 
-            override val inputModeManager: InputModeManager
-                get() = base.inputModeManager
+            override val isWindowTransparent   get() = false
+            override val hasNonTranslationComponents get() = false
+            override val measureDrawLayerBounds get() = false
 
             override fun setPointerIcon(pointerIcon: androidx.compose.ui.input.pointer.PointerIcon) {
-                val cursorName = capturedIconConverter(pointerIcon)
-                println("[OffScreenRenderer] pointer icon → $cursorName")
-                capturedIconChanged?.invoke(cursorName)
+                capturedIconChanged?.invoke(capturedConverter(pointerIcon))
             }
 
             override suspend fun startInputMethod(
@@ -348,19 +337,19 @@ internal class OffScreenRenderer(
                     onEditCommand = request.onEditCommand,
                     onImeAction   = request.onImeAction ?: {}
                 )
-                setSession(session)
+                inputSession = session
                 println("[OffScreenRenderer] startInputMethod — input session open")
                 try {
                     suspendCancellableCoroutine<Nothing> { cont ->
                         cont.invokeOnCancellation {
-                            if (sessionRef.value === session) {
-                                setSession(null)
+                            if (inputSession === session) {
+                                inputSession = null
                                 println("[OffScreenRenderer] input session closed")
                             }
                         }
                     }
                 } finally {
-                    if (sessionRef.value === session) setSession(null)
+                    if (inputSession === session) inputSession = null
                 }
             }
         }

@@ -54,7 +54,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "pkg.virdin.wayland"
-            packageVersion = "2.1.5"
+            packageVersion = "2.1.7"
         }
     }
 }
@@ -69,7 +69,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.1.5"
+            version = "2.1.7"
             from(components["kotlin"])
         }
     }
