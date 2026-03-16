@@ -1,7 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
-
-
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
@@ -47,24 +45,31 @@ kotlin {
     }
 }
 
-//compose.desktop {
-//    application {
-//        mainClass = "pkg.virdin.wayland.MainKt"
-//
-//        nativeDistributions {
-//            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-//            packageName = "pkg.virdin.wayland"
-//            packageVersion = "2.1.3"
-//        }
-//    }
-//}
+val agentJar = "${projectDir}/src/jvmMain/resources/virdin-agent.jar"
+
+compose.desktop {
+    application {
+        mainClass = "pkg.virdin.wayland.MainKt"
+        jvmArgs("-javaagent:$agentJar")
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            packageName = "pkg.virdin.wayland"
+            packageVersion = "2.1.4"
+        }
+    }
+}
+
+// Apply agent to jvmRun and any JavaExec task during development
+tasks.withType<JavaExec> {
+    jvmArgs("-javaagent:$agentJar")
+}
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.1.3"
+            version = "2.1.4"
             from(components["kotlin"])
         }
     }

@@ -5,7 +5,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.platform.PlatformScreenReader
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.*
@@ -13,12 +15,13 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.jetbrains.skia.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-class VirdinInputSession(
+internal class VirdinInputSession(
     val onEditCommand: (List<EditCommand>) -> Unit,
     val onImeAction:   (ImeAction) -> Unit
 ) {
@@ -32,24 +35,21 @@ internal class OffScreenRenderer(
     @Volatile var width: Int,
     @Volatile var height: Int,
     private val density: Density,
-    private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null,
-    // Called after setContent() on every new ImageComposeScene instance,
-    // including after resize. Use this to inject PlatformContext via
-    // SceneContextAccessor.putDelegate — scene is fully initialized at this point.
-    private val onSceneReady: ((ImageComposeScene) -> Unit)? = null
+    private val onPointerIconChanged: ((cursorName: String) -> Unit)? = null
 ) {
     private var scene: ImageComposeScene? = null
     private var currentContent: (@Composable () -> Unit)? = null
     private var pixelBuf: IntArray = IntArray(width * height)
     private var focusInitialized = false
 
-    @Volatile internal var inputSession: VirdinInputSession? = null
+    @Volatile private var inputSession: VirdinInputSession? = null
 
     private val sceneExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "virdin-scene").apply { isDaemon = true }
     }
     private val sceneDispatcher = sceneExecutor.asCoroutineDispatcher()
 
+    // Key repeat
     private var repeatJob: Job? = null
     private val repeatScope = CoroutineScope(sceneDispatcher)
 
@@ -101,6 +101,7 @@ internal class OffScreenRenderer(
         currentContent?.let { recreate(it) }
     }
 
+    // Tracks which buttons are currently held for drag/highlight support.
     private var currentButtons = PointerButtons()
 
     fun injectPointerEvent(event: PointerEvent) = postOnScene {
@@ -140,6 +141,7 @@ internal class OffScreenRenderer(
     fun injectKeyEvent(event: KeyEvent) = postOnScene {
         val sc = scene ?: return@postOnScene
 
+        // KeyUp — cancel repeat only.
         if (event.state == 0) {
             repeatJob?.cancel()
             repeatJob = null
@@ -279,8 +281,6 @@ internal class OffScreenRenderer(
         return dst
     }
 
-    // ── Pointer icon ──────────────────────────────────────────────────────────
-
     private fun pointerIconToCursorName(icon: androidx.compose.ui.input.pointer.PointerIcon): String {
         return try {
             val cursorField = icon.javaClass.declaredFields
@@ -310,14 +310,61 @@ internal class OffScreenRenderer(
     @OptIn(InternalComposeUiApi::class)
     private fun makePlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
-    ): androidx.compose.ui.platform.PlatformContext =
-        object : androidx.compose.ui.platform.PlatformContext by base {
+    ): androidx.compose.ui.platform.PlatformContext {
+        // Capture everything we need as local vals so the anonymous object
+        // holds no reference to the outer OffScreenRenderer instance via
+        // Kotlin's "by base" delegation (which adds its own $$delegate_0 field
+        // and can NPE when accessed from a library JAR context).
+        val capturedWindowInfo    = base.windowInfo
+        val capturedIconChanged   = onPointerIconChanged
+        val capturedIconConverter = ::pointerIconToCursorName
+        val sessionRef            = object {
+            @Volatile var value: VirdinInputSession? = null
+        }
+        // Mirror sessionRef into the outer field on set
+        val setSession: (VirdinInputSession?) -> Unit = { s ->
+            sessionRef.value = s
+            inputSession = s
+        }
+
+        return object : androidx.compose.ui.platform.PlatformContext {
+            override val windowInfo get() = capturedWindowInfo
+            override val screenReader: PlatformScreenReader
+                get() = base.screenReader
+
+            override val inputModeManager: InputModeManager
+                get() = base.inputModeManager
+
             override fun setPointerIcon(pointerIcon: androidx.compose.ui.input.pointer.PointerIcon) {
-                val cursorName = pointerIconToCursorName(pointerIcon)
+                val cursorName = capturedIconConverter(pointerIcon)
                 println("[OffScreenRenderer] pointer icon → $cursorName")
-                onPointerIconChanged?.invoke(cursorName)
+                capturedIconChanged?.invoke(cursorName)
+            }
+
+            override suspend fun startInputMethod(
+                request: androidx.compose.ui.platform.PlatformTextInputMethodRequest
+            ): Nothing {
+                val session = VirdinInputSession(
+                    onEditCommand = request.onEditCommand,
+                    onImeAction   = request.onImeAction ?: {}
+                )
+                setSession(session)
+                println("[OffScreenRenderer] startInputMethod — input session open")
+                try {
+                    suspendCancellableCoroutine<Nothing> { cont ->
+                        cont.invokeOnCancellation {
+                            if (sessionRef.value === session) {
+                                setSession(null)
+                                println("[OffScreenRenderer] input session closed")
+                            }
+                        }
+                    }
+                } finally {
+                    if (sessionRef.value === session) setSession(null)
+                }
             }
         }
+    }
 
     @OptIn(InternalComposeUiApi::class)
     private fun injectPlatformContext(sc: ImageComposeScene) {
@@ -325,40 +372,35 @@ internal class OffScreenRenderer(
             val ctxField = sc.javaClass.getDeclaredField("_platformContext")
             ctxField.isAccessible = true
             val ctx = ctxField.get(sc)
+
             val delegateField = ctx.javaClass.getDeclaredField("\$\$delegate_0")
             delegateField.isAccessible = true
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
-            delegateField.set(ctx, makePlatformContext(existing))
-            println("[OffScreenRenderer] PlatformContext injected (pointer icon only)")
+            val replacement = makePlatformContext(existing)
+
+            // Agent opens java.base/java.lang.reflect at JVM startup so this
+            // Field.set on a final field works without any Unsafe workaround.
+            delegateField.set(ctx, replacement)
+
+            println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {
             println("[OffScreenRenderer] PlatformContext injection failed: ${e.message}")
         }
     }
 
-    // ── Scene recreation ──────────────────────────────────────────────────────
-
     private fun recreate(content: @Composable () -> Unit) {
         scene?.close()
         inputSession = null
         repeatJob?.cancel()
-
         val sc = ImageComposeScene(
             width            = width,
             height           = height,
             density          = density,
             coroutineContext = sceneDispatcher
-        )
-
-        // Set content first — fully initializes _platformContext internals.
-        sc.setContent { androidx.compose.material3.MaterialTheme { content() } }
-
-        // Consumer injects startInputMethod first, into the fully initialized scene.
-        onSceneReady?.invoke(sc)
-
-        // Library wraps whatever is now in the delegate to add setPointerIcon,
-        // preserving the consumer's startInputMethod implementation underneath.
+        ) {
+            androidx.compose.material3.MaterialTheme { content() }
+        }
         injectPlatformContext(sc)
-
         scene = sc
         focusInitialized = false
     }
