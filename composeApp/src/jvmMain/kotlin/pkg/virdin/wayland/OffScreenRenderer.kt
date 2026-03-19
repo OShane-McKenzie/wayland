@@ -385,6 +385,10 @@ internal class OffScreenRenderer(
             )
             putMethod.invoke(internalUnsafe, ctx, offset, replacement)
 
+            val verify = delegateField.get(ctx)
+            println("[OffScreenRenderer] delegate after write: ${verify?.javaClass?.name}")
+            println("[OffScreenRenderer] is our replacement: ${verify === replacement}")
+
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {
             println("[OffScreenRenderer] PlatformContext injection failed: ${e.message}")
