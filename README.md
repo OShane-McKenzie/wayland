@@ -2,7 +2,8 @@
 
 A Kotlin/JVM library that lets Jetpack Compose Desktop applications render directly onto Wayland layer-shell surfaces. Build docks, panels, desktop backgrounds, lock screens, on-screen displays, and application menus with native Wayland integration.
 
-
+[![](https://jitpack.io/v/OShane-McKenzie/wayland.svg)](https://jitpack.io/#OShane-McKenzie/wayland)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 ---
 
 ## License
@@ -28,7 +29,8 @@ See the full license text at [https://www.gnu.org/licenses/gpl-3.0](https://www.
 ---
 
 ## Requirements
-
+- composeMultiplatform = "1.9.3" (currently the supported version)
+- kotlin = "2.2.21" (currently the supported version)
 - Linux with Wayland
 - Compositor supporting `zwlr_layer_shell_v1` (Sway, Hyprland, KWin 5.27+)
 - Java 24.0.2 or higher
@@ -46,6 +48,26 @@ JVM (Compose/Skia) --socket--> wayland-helper --Wayland--> Compositor
         +-------------- shared memory (pixels) <----------------+
 ```
 
+## Installation
+
+Add JitPack to your `settings.gradle.kts`:
+
+```kotlin
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+```
+
+Add the dependency to your `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation("com.github.OShane-McKenzie:wayland:2.1.9-ALPHA")
+}
+```
 ---
 
 ## Binary Deployment
