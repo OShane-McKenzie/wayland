@@ -5,9 +5,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.pointer.*
-import androidx.compose.ui.platform.PlatformScreenReader
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.*
@@ -310,24 +308,12 @@ internal class OffScreenRenderer(
     @OptIn(InternalComposeUiApi::class)
     private fun makePlatformContext(
         base: androidx.compose.ui.platform.PlatformContext
-    ): androidx.compose.ui.platform.PlatformContext {
-        val capturedWindowInfo  = base.windowInfo
-        val capturedInputMode   = base.inputModeManager
-        val capturedScreenReader = base.screenReader
-        val capturedIconChanged = onPointerIconChanged
-        val capturedConverter   = ::pointerIconToCursorName
-
-        return object : androidx.compose.ui.platform.PlatformContext {
-            override val windowInfo       get() = capturedWindowInfo
-            override val inputModeManager get() = capturedInputMode
-            override val screenReader     get() = capturedScreenReader
-
-            override val isWindowTransparent   get() = false
-            override val hasNonTranslationComponents get() = false
-            override val measureDrawLayerBounds get() = false
-
+    ): androidx.compose.ui.platform.PlatformContext =
+        object : androidx.compose.ui.platform.PlatformContext by base {
             override fun setPointerIcon(pointerIcon: androidx.compose.ui.input.pointer.PointerIcon) {
-                capturedIconChanged?.invoke(capturedConverter(pointerIcon))
+                val cursorName = pointerIconToCursorName(pointerIcon)
+                println("[OffScreenRenderer] pointer icon → $cursorName")
+                onPointerIconChanged?.invoke(cursorName)
             }
 
             override suspend fun startInputMethod(
@@ -353,7 +339,6 @@ internal class OffScreenRenderer(
                 }
             }
         }
-    }
 
     @OptIn(InternalComposeUiApi::class)
     private fun injectPlatformContext(sc: ImageComposeScene) {
@@ -367,27 +352,14 @@ internal class OffScreenRenderer(
             val existing = delegateField.get(ctx) as androidx.compose.ui.platform.PlatformContext
             val replacement = makePlatformContext(existing)
 
-            // jdk.internal.misc.Unsafe is opened by the agent.
-            // Using reflection to invoke it avoids any direct deprecated reference.
-            val internalUnsafeClass  = Class.forName("jdk.internal.misc.Unsafe")
-            val internalUnsafeField  = internalUnsafeClass.getDeclaredField("theUnsafe")
-            internalUnsafeField.isAccessible = true
-            val internalUnsafe       = internalUnsafeField.get(null)
-
-            val offsetMethod = internalUnsafe.javaClass.getMethod(
-                "objectFieldOffset", java.lang.reflect.Field::class.java
+            // Use MethodHandles to write the final field.
+            // Requires --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+            //           --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+            val lookup = java.lang.invoke.MethodHandles.privateLookupIn(
+                ctx.javaClass,
+                java.lang.invoke.MethodHandles.lookup()
             )
-            val offset = offsetMethod.invoke(internalUnsafe, delegateField) as Long
-
-            val putMethod = internalUnsafe.javaClass.getMethod(
-                "putReference",
-                Any::class.java, Long::class.java, Any::class.java
-            )
-            putMethod.invoke(internalUnsafe, ctx, offset, replacement)
-
-            val verify = delegateField.get(ctx)
-            println("[OffScreenRenderer] delegate after write: ${verify?.javaClass?.name}")
-            println("[OffScreenRenderer] is our replacement: ${verify === replacement}")
+            lookup.unreflectSetter(delegateField).invoke(ctx, replacement)
 
             println("[OffScreenRenderer] PlatformContext injected")
         } catch (e: Exception) {

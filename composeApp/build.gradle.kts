@@ -45,31 +45,28 @@ kotlin {
     }
 }
 
-val agentJar = "${projectDir}/src/jvmMain/resources/virdin-agent.jar"
 
 compose.desktop {
     application {
         mainClass = "pkg.virdin.wayland.MainKt"
-        jvmArgs("-javaagent:$agentJar")
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("proguard-rules.pro"))
+        }
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(TargetFormat.AppImage)
             packageName = "pkg.virdin.wayland"
-            packageVersion = "2.1.8"
+            packageVersion = "2.1.9"
         }
     }
 }
 
-// Apply agent to jvmRun and any JavaExec task during development
-tasks.withType<JavaExec> {
-    jvmArgs("-javaagent:$agentJar")
-}
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.1.8"
+            version = "2.1.9"
             from(components["kotlin"])
         }
     }

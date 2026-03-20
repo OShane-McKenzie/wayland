@@ -2,8 +2,6 @@
 
 A Kotlin/JVM library that lets Jetpack Compose Desktop applications render directly onto Wayland layer-shell surfaces. Build docks, panels, desktop backgrounds, lock screens, on-screen displays, and application menus with native Wayland integration.
 
-[![](https://jitpack.io/v/OShane-McKenzie/wayland.svg)](https://jitpack.io/#OShane-McKenzie/wayland)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ---
 
@@ -33,7 +31,7 @@ See the full license text at [https://www.gnu.org/licenses/gpl-3.0](https://www.
 
 - Linux with Wayland
 - Compositor supporting `zwlr_layer_shell_v1` (Sway, Hyprland, KWin 5.27+)
-- Java 17 or higher
+- Java 24.0.2 or higher
 - Gradle 8.0 or higher
 
 ---
@@ -50,43 +48,48 @@ JVM (Compose/Skia) --socket--> wayland-helper --Wayland--> Compositor
 
 ---
 
-## Installation
+## Binary Deployment
 
-Add JitPack to your `settings.gradle.kts`:
+Every surface function accepts an optional `binary` parameter of type `BinarySource` that controls how the `wayland-helper` native binary is located.
 
-```kotlin
-dependencyResolutionManagement {
-    repositories {
-        mavenCentral()
-        maven("https://jitpack.io")
-    }
-}
-```
+### Default: bundled inside the JAR
 
-Add the dependency to your `build.gradle.kts`:
+By default `binary = BinarySource.Bundled` is used, so no installation step is needed. At startup the library extracts the correct architecture-specific binary from the JAR's resources (`/native/<arch>/wayland-helper`) into a temporary directory, marks it executable, and cleans it up on JVM exit.
 
 ```kotlin
-dependencies {
-    implementation("com.github.OShane-McKenzie:wayland:2.0.6-ALPHA")
-}
+// Explicit, but identical to omitting the parameter entirely
+val bridge = waylandDock(
+    position = ContentPosition.BOTTOM,
+    size     = 64,
+    binary   = BinarySource.Bundled,
+    scope    = scope
+) { /* content */ }
 ```
 
-### Required JVM flags
+Supported architectures out of the box: `linux-x86_64`, `linux-aarch64`.
+
+### Alternative: point to a pre-installed binary
+
+If you have `wayland-helper` installed system-wide (for example via your distro's package manager or a custom build), pass `BinarySource.Path` to skip extraction entirely:
+
+```kotlin
+val bridge = waylandDock(
+    position = ContentPosition.BOTTOM,
+    size     = 64,
+    binary   = BinarySource.Path("/usr/local/bin/wayland-helper"),
+    scope    = scope
+) { /* content */ }
+```
+
+The file must exist and be executable, otherwise an `IllegalArgumentException` is thrown at surface creation time before any Wayland connection is attempted.
+
+### All surface functions accept `binary`
+
+The parameter is available on every top-level surface helper — `waylandDock`, `waylandPanel`, `waylandOsd`, `waylandAppMenu`, `waylandDesktopBackground`, `waylandLockScreen`, and `waylandSurface` — so you can mix strategies within the same process if needed.
+
+---
 
 The library uses reflection to wire up pointer icon and text input callbacks inside `ImageComposeScene`. Add these flags to your app's `build.gradle.kts`:
-
-```kotlin
-compose.desktop {
-    application {
-        jvmArgs(
-            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-            "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
-        )
-    }
-}
-```
-
-Without these flags, cursor shape changes and keyboard input sessions will not function.
 
 ---
 
