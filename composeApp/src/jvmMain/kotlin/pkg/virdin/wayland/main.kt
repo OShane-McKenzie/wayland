@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.*
 import kotlinx.coroutines.swing.Swing
 import javax.swing.SwingUtilities
+//import pkg.virdin.window.VirdinOutlinedTextField
 
 
 fun main() {
@@ -52,6 +53,7 @@ suspend fun demoBottomDock(scope: CoroutineScope) {
             contentAlignment = Alignment.Center
         ) {
             var text by remember { mutableStateOf("") }
+            //VirdinOutlinedTextField(value = text, {text = it})
             Row(verticalAlignment = Alignment.CenterVertically){ Text("🚀  My Dock", color = Color.White); OutlinedTextField(value = text, {text = it}) }
         }
     }

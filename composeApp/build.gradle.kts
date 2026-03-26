@@ -46,19 +46,21 @@ kotlin {
 }
 
 
-compose.desktop {
-    application {
-        mainClass = "pkg.virdin.wayland.MainKt"
-        buildTypes.release.proguard {
-            configurationFiles.from(project.file("proguard-rules.pro"))
-        }
-        nativeDistributions {
-            targetFormats(TargetFormat.AppImage)
-            packageName = "pkg.virdin.wayland"
-            packageVersion = "2.1.9"
-        }
-    }
-}
+//compose.desktop {
+//    application {
+//        mainClass = "pkg.virdin.wayland.MainKt"
+//
+//        buildTypes.release.proguard {
+//            configurationFiles.from(project.file("proguard-rules.pro"))
+//        }
+//        nativeDistributions {
+//            targetFormats(TargetFormat.AppImage)
+//            packageName = "pkg.virdin.wayland"
+//            packageVersion = "2.2.0"
+//        }
+//    }
+//}
+
 
 
 publishing {
@@ -66,7 +68,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "pkg.virdin"
             artifactId = "wayland"
-            version = "2.1.9"
+            version = "2.2.0"
             from(components["kotlin"])
         }
     }
